@@ -1,0 +1,63 @@
+{
+  "raw_dir": "/Users/gsasikiran-tib/tib/research/sci-jepa/SCI-JEPA/dataset_creation/sample_raw",
+  "coarse_label": true,
+  "subset": {
+    "field": null,
+    "domain": null,
+    "limit": null
+  },
+  "label_source": "field_subfield",
+  "prefix": null,
+  "paper_ids": null,
+  "coverage": {
+    "num_papers": 3,
+    "skipped": 0,
+    "papers_with_claims": 3,
+    "papers_with_method": 3,
+    "papers_with_result": 3,
+    "total_claims": 13,
+    "total_evidence": 19,
+    "total_implications": 13
+  },
+  "nodes": {
+    "paper": 3,
+    "field": 1,
+    "claim": 13,
+    "method": 3,
+    "result": 3,
+    "evidence": 19,
+    "implication": 13
+  },
+  "total_nodes": 55,
+  "edges": {
+    "paper__has_claim__claim": 13,
+    "paper__has_method__method": 3,
+    "paper__has_result__result": 3,
+    "paper__in_field__field": 3,
+    "paper__cites__paper": 0,
+    "claim__supported_by__evidence": 13,
+    "claim__challenged_by__evidence": 6,
+    "claim__implies__implication": 13,
+    "method__produces__result": 3,
+    "result__grounds__claim": 13
+  },
+  "total_edges": 70,
+  "dangling_citations_dropped": 56,
+  "citations": {
+    "directed": true,
+    "orientation": "src=citing paper, dst=cited paper",
+    "edges": 0,
+    "dangling_dropped": 56,
+    "self_citations_dropped": 1,
+    "duplicate_edges_dropped": 0,
+    "papers_citing": 0,
+    "papers_cited": 0,
+    "max_out_degree": 0,
+    "max_in_degree": 0,
+    "edges_with_years": 0,
+    "edges_backwards_in_time": 0
+  },
+  "fields": [
+    "Medicine"
+  ]
+}

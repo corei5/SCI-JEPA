@@ -1,0 +1,32 @@
+[project]
+name = "sci-jepa"
+version = "0.1.0"
+description = "Knowledge graph construction and JEPA-style representation learning over scientific papers"
+requires-python = ">=3.10"
+
+# Core: what `dataset_creation` needs to FETCH the corpus. Graph construction
+# itself (schema.py / build_sample.py / visualize.py) is standard library only.
+dependencies = [
+    "huggingface-hub>=0.27",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+# Pass 2 of the graph build: MiniLM node embeddings -> HeteroData tensors.
+embed = [
+    "torch>=2.2",
+    "torch-geometric>=2.5",
+    "sentence-transformers>=3.0",
+]
+# Everything under Analysis/ (pretraining, probes, ablations, diagnostics).
+analysis = [
+    "yacs>=0.1.8",
+    "numpy>=1.26",
+    "scikit-learn>=1.4",
+    "matplotlib>=3.8",
+]
+
+[tool.uv]
+# The repo is a set of runnable packages (`dataset_creation/`, `Analysis/core`,
+# `Analysis/train`), not a distributable library, so don't try to build it.
+package = false

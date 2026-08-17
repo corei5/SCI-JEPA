@@ -1,0 +1,4 @@
+# Downloaded corpus and generated graphs — data stays out of git.
+# `sample_raw/` and `sample/` are deliberately NOT ignored: they are the tiny
+# reproducible example that ships with the repo.
+data/

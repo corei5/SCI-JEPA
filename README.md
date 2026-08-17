@@ -16,29 +16,37 @@ Rank-2-Trap builds a heterogeneous knowledge graph from a corpus of scientific p
 
 ---
 
-## 📁 Repository Structure (Need to fix)
+## 📁 Repository Structure
 
 ```
-Rank-2-Trap/
-├── core/                       # Core library
-│   ├── config.py               # Config system (cfg, update_cfg)
-│   ├── get_data.py             # Dataset creation + stats
-│   └── data_utils/
-│       └── paper_graph.py      # build_hetero_graph(): raw JSON → hetero graph
-├── dataset/
-│   └── papers/
-│       ├── raw/                # Raw paper .json files (input)
-│       └── processed/          # Cached tensors (hetero graph, RWSE PE, etc.)
-├── train/
-│   ├── configs/
-│   │   └── papers.yaml         # Main training config
-│   ├── papers.py               # Part 1: Graph-JEPA self-supervised training
-│   ├── paper_reason.py         # Part 2: reasoning + link prediction
-│   ├── build_rwse.py           # Part 3a: schema analysis + RWSE positional encodings
-│   └── paper_reason_gjepa.py   # Part 3b: faithful Graph-JEPA (GINE + masked JEPA)
-├── JEPA-rea.sh                 # End-to-end SLURM pipeline (Parts 1–3)
-└── README.md
+SCI-JEPA/
+├── dataset_creation/           # ← raw JSON → knowledge graph (see its README)
+│   ├── schema.py               # record parsing + node/edge wiring (stdlib only)
+│   ├── paper_graph.py          # build_hetero_graph(): raw JSON → HeteroData
+│   ├── papers.py               # PapersDataset: one graph per paper (Part 1)
+│   ├── build_sample.py         # small, embedding-free sample KG
+│   ├── visualize.py            # renders a sample KG to standalone HTML/SVG
+│   ├── sample_raw/             # 3 trimmed real records
+│   └── sample/                 # generated sample (nodes/edges/ttl/html)
+└── Analysis/                   # modelling: pretraining, probes, ablations
+    ├── core/                   # config, models, transforms, trainer
+    ├── dataset/papers/
+    │   ├── raw/                # raw paper .json files (input)
+    │   └── processed/          # cached tensors (hetero graph, RWSE PE, …)
+    ├── train/
+    │   ├── configs/papers.yaml # main training config
+    │   ├── papers.py           # Part 1: Graph-JEPA self-supervised training
+    │   ├── paper_reason.py     # Part 2: reasoning + link prediction
+    │   ├── build_rwse.py       # Part 3a: schema analysis + RWSE positional encodings
+    │   └── paper_reason_gjepa.py  # Part 3b: faithful Graph-JEPA (GINE + masked JEPA)
+    └── JEPA-rea.sh             # end-to-end SLURM pipeline (Parts 1–3)
 ```
+
+Graph construction lives in `dataset_creation/`; `Analysis/core/data_utils/`
+keeps thin shims so existing `from core.data_utils.paper_graph import …`
+statements still work. **[dataset_creation/README.md](dataset_creation/README.md)
+documents the KG schema, the record formats, and how to build and visualise a
+sample.**
 
 ---
 
