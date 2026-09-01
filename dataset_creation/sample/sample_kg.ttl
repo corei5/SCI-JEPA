@@ -26,24 +26,18 @@ ex:result_0 a ex:Result ; rdfs:label "The patient presented with cough and dyspn
 ex:result_1 a ex:Result ; rdfs:label "The mean suturing times were compared between PGY3 and PGY4 residents. For all residents, the average time for laparoscopic suturing was 382 ± 159 seconds, and for robotic suturing, it was 326 ± 196 seconds (P = 0.12). PGY3s had a shorter suturing time than PGY4s in both robotic and laparoscopic suturing. The PGY4 group showed a statistically significant difference (P = 0.02) between robotic (337…" .
 ex:result_2 a ex:Result ; rdfs:label "Minocycline significantly reduced PP in BDL rats (p = 0.008), decreased SMA flow (p = 0.023) and CI (p = 0.002). Minocycline also significantly decreased plasma VEGF concentration (BDL-V vs. BDL-M: 16.71 ± 0.96 vs. 13.81 ± 0.73 ρg/ml, p = 0.028) and downregulated mesenteric protein expressions of MMP-9 (0.8043 ± 0.1676 vs. 0.3838 ± 0.0761, p = 0.033), iNOS (0.7789 ± 0.0806 vs. 0.5378 ± 0.0616, p =…" .
 ex:evidence_0 a ex:Evidence ; rdfs:label "The patient presented with diffuse GGOs on chest CT, and the diagnosis of humidifier lung was confirmed after a detailed history of humidifier use and HRCT interpretation." .
-ex:evidence_1 a ex:Evidence ; rdfs:label "The study is a single case report, and the findings may not be generalizable to all patients with diffuse GGOs." .
-ex:evidence_2 a ex:Evidence ; rdfs:label "The HRCT scan revealed ill-defined centrilobular nodules and mosaic attenuation, which are typical of HP but atypical of COVID-19, supporting the diagnosis of humidifier lung." .
-ex:evidence_3 a ex:Evidence ; rdfs:label "The HRCT findings may not be specific to humidifier lung, and other conditions can present with similar imaging features." .
-ex:evidence_4 a ex:Evidence ; rdfs:label "The ICT with the humidifier induced symptoms and physiological changes in the patient, confirming the diagnosis of humidifier lung." .
-ex:evidence_5 a ex:Evidence ; rdfs:label "The ICT may not be available or feasible in all clinical settings." .
-ex:evidence_6 a ex:Evidence ; rdfs:label "The patient's humidifier use, combined with the increasing use of humidifiers during the COVID-19 pandemic, suggests a potential association." .
-ex:evidence_7 a ex:Evidence ; rdfs:label "The study is a single case report and does not provide evidence of a causal relationship or the prevalence of humidifier lung." .
-ex:evidence_8 a ex:Evidence ; rdfs:label "Residents in Group 2 had a lower mean suture time on the robot compared to Group 1, although this difference did not achieve statistical significance (P = 0.5)." .
-ex:evidence_9 a ex:Evidence ; rdfs:label "The difference in robotic suturing times between the two groups was not statistically significant." .
-ex:evidence_10 a ex:Evidence ; rdfs:label "Residents in Group 1 had a significantly lower mean suture time than those in Group 2 for laparoscopic suturing (P = 0.009)." .
-ex:evidence_11 a ex:Evidence ; rdfs:label "The study found that PGY3s, who received dry-lab training, had shorter suturing times compared to PGY4s, who had more experience but did not receive additional dry-lab training." .
-ex:evidence_12 a ex:Evidence ; rdfs:label "The average time for laparoscopic suturing was 382 ± 159 seconds, and for robotic suturing, it was 326 ± 196 seconds (P = 0.12)." .
-ex:evidence_13 a ex:Evidence ; rdfs:label "The difference between the two modalities was not statistically significant." .
-ex:evidence_14 a ex:Evidence ; rdfs:label "Minocycline treatment significantly reduced portal pressure in BDL rats (p = 0.008) compared to vehicle." .
-ex:evidence_15 a ex:Evidence ; rdfs:label "Minocycline significantly decreased SMA flow in BDL rats (p = 0.023)." .
-ex:evidence_16 a ex:Evidence ; rdfs:label "Minocycline significantly decreased the plasma VEGF concentration (BDL-V vs. BDL-M: 16.71 ± 0.96 vs. 13.81 ± 0.73 ρg/ml, p = 0.028)." .
-ex:evidence_17 a ex:Evidence ; rdfs:label "SB-3CT reduced PP (p = 0.019) in BDL rats." .
-ex:evidence_18 a ex:Evidence ; rdfs:label "MMP-9 KO BDL mice had significantly lower PP compared with WT BDL mice (12.1 ± 0.5 vs. 7.8 ± 0.7 mmHg, p = 0.007)." .
+ex:evidence_1 a ex:Evidence ; rdfs:label "The HRCT scan revealed ill-defined centrilobular nodules and mosaic attenuation, which are typical of HP but atypical of COVID-19, supporting the diagnosis of humidifier lung." .
+ex:evidence_2 a ex:Evidence ; rdfs:label "The ICT with the humidifier induced symptoms and physiological changes in the patient, confirming the diagnosis of humidifier lung." .
+ex:evidence_3 a ex:Evidence ; rdfs:label "The patient's humidifier use, combined with the increasing use of humidifiers during the COVID-19 pandemic, suggests a potential association." .
+ex:evidence_4 a ex:Evidence ; rdfs:label "Residents in Group 2 had a lower mean suture time on the robot compared to Group 1, although this difference did not achieve statistical significance (P = 0.5)." .
+ex:evidence_5 a ex:Evidence ; rdfs:label "Residents in Group 1 had a significantly lower mean suture time than those in Group 2 for laparoscopic suturing (P = 0.009)." .
+ex:evidence_6 a ex:Evidence ; rdfs:label "The study found that PGY3s, who received dry-lab training, had shorter suturing times compared to PGY4s, who had more experience but did not receive additional dry-lab training." .
+ex:evidence_7 a ex:Evidence ; rdfs:label "The average time for laparoscopic suturing was 382 ± 159 seconds, and for robotic suturing, it was 326 ± 196 seconds (P = 0.12)." .
+ex:evidence_8 a ex:Evidence ; rdfs:label "Minocycline treatment significantly reduced portal pressure in BDL rats (p = 0.008) compared to vehicle." .
+ex:evidence_9 a ex:Evidence ; rdfs:label "Minocycline significantly decreased SMA flow in BDL rats (p = 0.023)." .
+ex:evidence_10 a ex:Evidence ; rdfs:label "Minocycline significantly decreased the plasma VEGF concentration (BDL-V vs. BDL-M: 16.71 ± 0.96 vs. 13.81 ± 0.73 ρg/ml, p = 0.028)." .
+ex:evidence_11 a ex:Evidence ; rdfs:label "SB-3CT reduced PP (p = 0.019) in BDL rats." .
+ex:evidence_12 a ex:Evidence ; rdfs:label "MMP-9 KO BDL mice had significantly lower PP compared with WT BDL mice (12.1 ± 0.5 vs. 7.8 ± 0.7 mmHg, p = 0.007)." .
 ex:implication_0 a ex:Implication ; rdfs:label "Clinicians should include humidifier lung in the differential diagnosis of patients with similar symptoms and radiological findings, particularly in the context of increased humidifier use." .
 ex:implication_1 a ex:Implication ; rdfs:label "Radiologists and pulmonologists should carefully interpret HRCT findings in conjunction with clinical history to differentiate between humidifier lung and COVID-19." .
 ex:implication_2 a ex:Implication ; rdfs:label "The ICT can be a valuable diagnostic tool for confirming humidifier lung when the diagnosis is uncertain." .
@@ -81,25 +75,35 @@ ex:paper_2 ex:hasResult ex:result_2 .
 ex:paper_0 ex:inField ex:field_0 .
 ex:paper_1 ex:inField ex:field_0 .
 ex:paper_2 ex:inField ex:field_0 .
-ex:claim_0 ex:supportedBy ex:evidence_0 .
-ex:claim_1 ex:supportedBy ex:evidence_2 .
-ex:claim_2 ex:supportedBy ex:evidence_4 .
-ex:claim_3 ex:supportedBy ex:evidence_6 .
-ex:claim_4 ex:supportedBy ex:evidence_8 .
-ex:claim_5 ex:supportedBy ex:evidence_10 .
-ex:claim_6 ex:supportedBy ex:evidence_11 .
-ex:claim_7 ex:supportedBy ex:evidence_12 .
-ex:claim_8 ex:supportedBy ex:evidence_14 .
-ex:claim_9 ex:supportedBy ex:evidence_15 .
-ex:claim_10 ex:supportedBy ex:evidence_16 .
-ex:claim_11 ex:supportedBy ex:evidence_17 .
-ex:claim_12 ex:supportedBy ex:evidence_18 .
-ex:claim_0 ex:challengedBy ex:evidence_1 .
-ex:claim_1 ex:challengedBy ex:evidence_3 .
-ex:claim_2 ex:challengedBy ex:evidence_5 .
-ex:claim_3 ex:challengedBy ex:evidence_7 .
-ex:claim_4 ex:challengedBy ex:evidence_9 .
-ex:claim_7 ex:challengedBy ex:evidence_13 .
+ex:method_0 ex:produces ex:result_0 .
+ex:method_1 ex:produces ex:result_1 .
+ex:method_2 ex:produces ex:result_2 .
+ex:result_0 ex:grounds ex:evidence_0 .
+ex:result_0 ex:grounds ex:evidence_1 .
+ex:result_0 ex:grounds ex:evidence_2 .
+ex:result_0 ex:grounds ex:evidence_3 .
+ex:result_1 ex:grounds ex:evidence_4 .
+ex:result_1 ex:grounds ex:evidence_5 .
+ex:result_1 ex:grounds ex:evidence_6 .
+ex:result_1 ex:grounds ex:evidence_7 .
+ex:result_2 ex:grounds ex:evidence_8 .
+ex:result_2 ex:grounds ex:evidence_9 .
+ex:result_2 ex:grounds ex:evidence_10 .
+ex:result_2 ex:grounds ex:evidence_11 .
+ex:result_2 ex:grounds ex:evidence_12 .
+ex:evidence_0 ex:supports ex:claim_0 .
+ex:evidence_1 ex:supports ex:claim_1 .
+ex:evidence_2 ex:supports ex:claim_2 .
+ex:evidence_3 ex:supports ex:claim_3 .
+ex:evidence_4 ex:supports ex:claim_4 .
+ex:evidence_5 ex:supports ex:claim_5 .
+ex:evidence_6 ex:supports ex:claim_6 .
+ex:evidence_7 ex:supports ex:claim_7 .
+ex:evidence_8 ex:supports ex:claim_8 .
+ex:evidence_9 ex:supports ex:claim_9 .
+ex:evidence_10 ex:supports ex:claim_10 .
+ex:evidence_11 ex:supports ex:claim_11 .
+ex:evidence_12 ex:supports ex:claim_12 .
 ex:claim_0 ex:implies ex:implication_0 .
 ex:claim_1 ex:implies ex:implication_1 .
 ex:claim_2 ex:implies ex:implication_2 .
@@ -113,19 +117,3 @@ ex:claim_9 ex:implies ex:implication_9 .
 ex:claim_10 ex:implies ex:implication_10 .
 ex:claim_11 ex:implies ex:implication_11 .
 ex:claim_12 ex:implies ex:implication_12 .
-ex:method_0 ex:produces ex:result_0 .
-ex:method_1 ex:produces ex:result_1 .
-ex:method_2 ex:produces ex:result_2 .
-ex:result_0 ex:grounds ex:claim_0 .
-ex:result_0 ex:grounds ex:claim_1 .
-ex:result_0 ex:grounds ex:claim_2 .
-ex:result_0 ex:grounds ex:claim_3 .
-ex:result_1 ex:grounds ex:claim_4 .
-ex:result_1 ex:grounds ex:claim_5 .
-ex:result_1 ex:grounds ex:claim_6 .
-ex:result_1 ex:grounds ex:claim_7 .
-ex:result_2 ex:grounds ex:claim_8 .
-ex:result_2 ex:grounds ex:claim_9 .
-ex:result_2 ex:grounds ex:claim_10 .
-ex:result_2 ex:grounds ex:claim_11 .
-ex:result_2 ex:grounds ex:claim_12 .

@@ -4,11 +4,11 @@ Render a sample knowledge graph (from build_sample.py) as a standalone HTML page
 Two figures, both drawn as hand-authored inline SVG — no JS, no libraries, no
 external assets, so the file opens straight from disk:
 
-  1. SCHEMA      the 7 node types and 10 relations, generated from schema.EDGE_TYPES
+  1. SCHEMA      the 7 node types and 9 relations, generated from schema.EDGE_TYPES
                  so it cannot drift from what the builder actually emits.
   2. INSTANCE    the real sample graph, one horizontal band per paper, laid out
                  along the reasoning chain
-                     method -> result -> claim -> {evidence, implication}
+                     method -> result -> evidence -> claim -> implication
 
 Usage
 -----
@@ -33,16 +33,18 @@ DEFAULT_SAMPLE = os.path.join(HERE, "sample")
 # boxes in the SAME column, so they are routed around the left rather than drawn
 # straight back through the column, where the node boxes would hide them.
 LEFT_GUTTER = 60
+# Column order IS the reasoning chain, so evidence sits between result and claim
+# and implication is the only leaf column on the right.
 COLS = {
     "field":       (80, 110),
     "paper":       (220, 210),
     "method":      (460, 180),
     "result":      (670, 180),
-    "claim":       (880, 230),
-    "evidence":    (1140, 300),
-    "implication": (1140, 300),
+    "evidence":    (880, 250),
+    "claim":       (1170, 250),
+    "implication": (1460, 280),
 }
-CANVAS_W = 1460
+CANVAS_W = 1780
 LEAF_H = 54          # vertical pitch of one evidence/implication row
 PAPER_GAP = 44       # blank space between paper bands
 BOX_H = 42
@@ -62,16 +64,15 @@ TYPE_COLOR = {
 
 # Relation -> (stroke var, dashed?, human gloss for the legend).
 REL_STYLE = {
-    "has_claim":     ("--e-struct", False, "paper owns this claim"),
-    "has_method":    ("--e-struct", False, "paper owns this method"),
-    "has_result":    ("--e-struct", False, "paper owns this result"),
-    "in_field":      ("--e-struct", True,  "paper joins a shared field hub"),
-    "cites":         ("--e-cites",  False, "intra-corpus citation"),
-    "produces":      ("--e-chain",  False, "imposed: method yields result"),
-    "grounds":       ("--e-chain",  False, "imposed: result backs every claim"),
-    "supported_by":  ("--e-support", False, "from supporting_evidence"),
-    "challenged_by": ("--e-contra", False, "from contradicting_evidence"),
-    "implies":       ("--e-implies", True, "from claim.implications"),
+    "has_claim":  ("--e-struct",  False, "paper owns this claim"),
+    "has_method": ("--e-struct",  False, "paper owns this method"),
+    "has_result": ("--e-struct",  False, "paper owns this result"),
+    "in_field":   ("--e-struct",  True,  "paper joins a shared field hub"),
+    "cites":      ("--e-cites",   False, "intra-corpus citation"),
+    "produces":   ("--e-chain",   False, "imposed: method yields result"),
+    "grounds":    ("--e-chain",   False, "imposed: result backs every evidence"),
+    "supports":   ("--e-support", False, "from supporting_evidence"),
+    "implies":    ("--e-implies", True,  "from claim.implications"),
 }
 REL_ORDER = [r for _, r, _, _ in EDGE_TYPES]
 
@@ -160,16 +161,19 @@ def marker_id(prefix, var):
 # ===========================================================================
 #  Figure 1 — schema
 # ===========================================================================
+# The chain is now five links long, so every reasoning node sits on ONE row and
+# the figure reads straight left-to-right. (Evidence and implication used to be
+# stacked leaves in a shared right-hand column.)
 SCHEMA_POS = {
     "field":       (60, 60),
     "paper":       (60, 190),
-    "method":      (300, 190),
-    "result":      (520, 190),
-    "claim":       (740, 190),
-    "evidence":    (980, 110),
-    "implication": (980, 275),
+    "method":      (260, 190),
+    "result":      (460, 190),
+    "evidence":    (660, 190),
+    "claim":       (860, 190),
+    "implication": (1060, 190),
 }
-SCHEMA_W, SCHEMA_H = 150, 40
+SCHEMA_W, SCHEMA_H = 140, 40
 
 
 def schema_svg():
@@ -181,8 +185,8 @@ def schema_svg():
         return (x + SCHEMA_W, y) if side == "r" else (x, y)
 
     # curve the paper->claim / paper->result edges below the main chain so they
-    # do not run through the method/result boxes
-    below = {"has_claim": 285, "has_result": 250}
+    # do not run through the boxes between them
+    below = {"has_claim": 290, "has_result": 250}
 
     for src, rel, dst, _prop in EDGE_TYPES:
         var, dashed, _ = REL_STYLE[rel]
@@ -229,11 +233,11 @@ def schema_svg():
             f'<text x="{x + SCHEMA_W / 2}" y="{y + 4}" font-size="13" text-anchor="middle" '
             f'font-weight="600">{nt}</text>')
 
-    return (f'<svg viewBox="0 0 1180 330" role="img" aria-label="Schema of the paper '
-            f'knowledge graph: paper nodes own method, result and claim nodes; method '
-            f'produces result, result grounds claim, and each claim links to supporting '
-            f'evidence, contradicting evidence and implications. Papers also link to a '
-            f'shared field hub and cite other papers.">'
+    return (f'<svg viewBox="0 0 1240 335" role="img" aria-label="Schema of the paper '
+            f'knowledge graph: paper nodes own method, result and claim nodes, and the '
+            f'reasoning relations form one chain — method produces result, result '
+            f'grounds evidence, evidence supports claim, claim implies implication. '
+            f'Papers also link to a shared field hub and cite other papers.">'
             + "".join(parts) + "</svg>")
 
 
@@ -246,11 +250,14 @@ def instance_svg(nodes, edges):
     for e in edges:
         out_edges.setdefault(e["rel"], []).append(e)
 
-    # claim -> its leaves, in the order the builder created them
-    leaves_of = {}
-    for rel in ("supported_by", "challenged_by", "implies"):
-        for e in out_edges.get(rel, []):
-            leaves_of.setdefault(e["src"], []).append(e["dst"])
+    # A claim's evidence is now on its LEFT (the edge runs evidence -> claim) and
+    # its implications on its RIGHT, so the two stacks are tracked separately
+    # instead of as one undifferentiated list of leaves.
+    evidence_of, impl_of = {}, {}
+    for e in out_edges.get("supports", []):
+        evidence_of.setdefault(e["dst"], []).append(e["src"])
+    for e in out_edges.get("implies", []):
+        impl_of.setdefault(e["src"], []).append(e["dst"])
 
     claims_of, method_of, result_of = {}, {}, {}
     for e in out_edges.get("has_claim", []):
@@ -263,21 +270,23 @@ def instance_svg(nodes, edges):
     papers = [n["id"] for n in nodes if n["type"] == "paper"]
 
     # ---- vertical layout: leaves drive everything, parents centre on children
+    # A claim reserves as many rows as its taller side needs. Evidence and
+    # implications SHARE those rows — they are in different columns, so stacking
+    # them independently costs no space and keeps each band compact.
     y = {}
     cursor = 40.0
     for p in papers:
         claim_ys = []
         for c in claims_of.get(p, []):
-            lv = leaves_of.get(c, [])
-            if lv:
-                for leaf in lv:
-                    y[leaf] = cursor
-                    cursor += LEAF_H
-                claim_ys.append(sum(y[l] for l in lv) / len(lv))
-            else:
-                claim_ys.append(cursor)
-                cursor += LEAF_H
+            ev, im = evidence_of.get(c, []), impl_of.get(c, [])
+            rows = max(len(ev), len(im), 1)
+            for k, n in enumerate(ev):
+                y[n] = cursor + k * LEAF_H
+            for k, n in enumerate(im):
+                y[n] = cursor + k * LEAF_H
+            claim_ys.append(cursor + (rows - 1) * LEAF_H / 2)
             y[c] = claim_ys[-1]
+            cursor += rows * LEAF_H
         band = sum(claim_ys) / len(claim_ys) if claim_ys else cursor
         y[p] = band
         if p in method_of:
@@ -334,22 +343,16 @@ def instance_svg(nodes, edges):
         parts.append(node_box(x0, y[n["id"]], w, h, lines,
                               TYPE_COLOR[n["type"]], n["text"][:220], n["id"]))
 
-    # ---- column headings
-    seen = set()
+    # ---- column headings (one per node type; every type has its own column now)
     for nt in NODE_TYPES:
-        x0, w = COLS[nt]
-        key = (x0, w)
-        label = "evidence / implication" if nt in ("evidence", "implication") else nt
-        if key in seen:
-            continue
-        seen.add(key)
+        x0, _w = COLS[nt]
         parts.append(f'<text x="{x0}" y="20" font-size="12" font-weight="600" '
-                     f'opacity="0.65">{esc(label)}</text>')
+                     f'opacity="0.65">{esc(nt)}</text>')
 
     return (f'<svg viewBox="0 0 {CANVAS_W} {height:.0f}" role="img" aria-label="The sample '
             f'knowledge graph: three medical papers, each expanded into its own reasoning '
-            f'subgraph of method, result, claims, supporting and contradicting evidence and '
-            f'implications, all sharing one Medicine field hub.">'
+            f'chain of method, result, supporting evidence, claims and implications, all '
+            f'sharing one Medicine field hub.">'
             + "".join(parts) + "</svg>")
 
 
@@ -365,7 +368,7 @@ PALETTE_LIGHT = {
     "--c-evidence": "#0369a1", "--c-evidence-bg": "#f0f9ff",
     "--c-implication": "#be185d", "--c-implication-bg": "#fdf2f8",
     "--e-struct": "#94a3b8", "--e-chain": "#4338ca", "--e-support": "#15803d",
-    "--e-contra": "#dc2626", "--e-implies": "#be185d", "--e-cites": "#b45309",
+    "--e-implies": "#be185d", "--e-cites": "#b45309",
     "--bg": "#ffffff", "--fg": "#0f172a", "--muted": "#64748b",
     "--rule": "#e2e8f0", "--panel": "#f8fafc",
 }
@@ -378,7 +381,7 @@ PALETTE_DARK = {
     "--c-evidence": "#7dd3fc", "--c-evidence-bg": "#082f49",
     "--c-implication": "#f9a8d4", "--c-implication-bg": "#4c0519",
     "--e-struct": "#64748b", "--e-chain": "#a5b4fc", "--e-support": "#4ade80",
-    "--e-contra": "#f87171", "--e-implies": "#f9a8d4", "--e-cites": "#fcd34d",
+    "--e-implies": "#f9a8d4", "--e-cites": "#fcd34d",
     "--bg": "#0b1120", "--fg": "#e2e8f0", "--muted": "#94a3b8",
     "--rule": "#1e293b", "--panel": "#111c33",
 }
@@ -480,15 +483,17 @@ full-corpus graph uses, minus the MiniLM embedding pass.</p>
 
 <h2>Schema</h2>
 <p>Every raw record becomes one <code>paper</code> node plus a small reasoning
-subgraph hanging off it. Two of the relations are <em>imposed</em> rather than read
-from the data: <code>produces</code> and <code>grounds</code> wire a paper's method to
-its result and its result to every one of its claims, giving each paper an internal
-chain instead of a flat star.</p>
+chain hanging off it: <code>method → result → evidence → claim → implication</code>.
+Two of the relations are <em>imposed</em> rather than read from the data:
+<code>produces</code> and <code>grounds</code> wire a paper's method to its result and
+its result to every piece of evidence it reports, giving each paper an internal
+chain instead of a flat star. Only supporting evidence is represented —
+<code>contradicting_evidence</code> is not read into the graph.</p>
 <figure>
 {schema_svg()}
-<figcaption>Node types and the ten relations <code>build_hetero_graph()</code> emits.
-Solid grey edges are ownership, indigo is the imposed method→result→claim chain,
-green and red are the two evidence polarities.</figcaption>
+<figcaption>Node types and the nine relations <code>build_hetero_graph()</code> emits.
+Solid grey edges are ownership, indigo is the imposed method→result→evidence chain,
+green carries the evidence into the claim it supports.</figcaption>
 </figure>
 {legend_html()}
 

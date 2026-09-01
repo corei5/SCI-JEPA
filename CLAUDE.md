@@ -48,10 +48,15 @@ from what the real pipeline embeds. Keep schema changes in `schema.py`; if you a
   connected reasoning subgraph because edges are typed and intra-paper — with PyG's `to_hetero`,
   message passing is already local. This is why `build_rwse.py` can treat papers as disconnected
   components.
-- Two of the ten relations are **imposed, not read from the data**: `(method, produces, result)`
-  and `(result, grounds, claim)`. The LLM summary never says which claim came from which result, so
-  the builder wires a paper's result to *all* of its claims. This is what makes a paper a chain
-  (`method → result → claim → evidence`) rather than a star.
+- Two of the nine relations are **imposed, not read from the data**: `(method, produces, result)`
+  and `(result, grounds, evidence)`. The LLM summary never says which evidence came from which
+  result, so the builder wires a paper's result to *all* of its evidence. This is what makes a paper
+  a chain (`paper → method → result → evidence → claim → implication`) rather than a star.
+- **Evidence is a link in that chain, not a leaf on a claim.** The edge runs `(evidence, supports,
+  claim)` — hence `supports`, not `supported_by`. `contradicting_evidence` is deliberately not read
+  into the graph, so there is no `challenges` relation and every evidence node is supporting
+  evidence. A claim with no evidence therefore hangs off `has_claim` alone; `coverage_report()`
+  counts those as `claims_without_evidence` and the builder prints the count.
 - `cites` is a **directed** relation: `(i, j)` means *i* cites *j* (src = citing, dst = cited). It
   is stored as one relation only — `Analysis/` applies `T.ToUndirected()`, which synthesises
   `rev_cites`, so adding a `cited_by` edge type would double those edges. `build_tables` drops

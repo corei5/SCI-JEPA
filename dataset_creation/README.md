@@ -31,8 +31,7 @@ metadata. The builder only ever touches these fields:
 | `methodological_details` / `procedures_architectures` | the `method` node |
 | `key_results` | the `result` node |
 | `claims[]` → `description` / `details` | `claim` nodes |
-| `claims[].supporting_evidence` | `evidence` nodes, via `supported_by` |
-| `claims[].contradicting_evidence` | `evidence` nodes, via `challenged_by` |
+| `claims[].supporting_evidence` | `evidence` nodes, via `supports` |
 | `claims[].implications` | `implication` nodes |
 | `openalex_id`, `oa_referenced_works` | `cites` edges |
 
@@ -78,29 +77,48 @@ Seven node types:
 | `claim` | 251,938 | many per paper |
 | `method` | 57,903 | ~1 per paper |
 | `result` | 57,903 | ~1 per paper |
-| `evidence` | 373,438 | many per claim |
+| `evidence` | 373,438 † | many per claim |
 | `implication` | 251,938 | many per claim |
 
-Ten relations — note that two of them are **imposed, not read from the data**:
+† That evidence figure predates the schema narrowing to *supporting* evidence
+only; it is now smaller. In the 6,191-paper health-sciences slice the graph has
+26,857 evidence nodes for 26,858 claims — close to 1:1.
+
+Nine relations — note that two of them are **imposed, not read from the data**:
 
 ```
 paper  --has_claim-->  claim          paper  --in_field-->  field
 paper  --has_method--> method         paper  --cites----->  paper     (DIRECTED, intra-corpus only)
 paper  --has_result--> result
 
-claim  --supported_by-->  evidence     ← supporting_evidence
-claim  --challenged_by--> evidence     ← contradicting_evidence
-claim  --implies------->  implication  ← claims[].implications
-
-method --produces--> result            ← IMPOSED: every paper's method → its result
-result --grounds---> claim             ← IMPOSED: the result → every claim it has
+method   --produces--> result          ← IMPOSED: every paper's method → its result
+result   --grounds---> evidence        ← IMPOSED: the result → every piece of evidence it reports
+evidence --supports--> claim           ← claims[].supporting_evidence
+claim    --implies---> implication     ← claims[].implications
 ```
 
 `produces` and `grounds` are the reason a paper is a *chain*
-(`method → result → claim → evidence`) rather than a flat star around the paper
-node. They encode the assumption that a paper's method yields its result and its
-result backs all of its claims — the LLM summary does not state which claim came
-from which result, so the builder wires them completely.
+
+```
+paper → method → result → evidence → claim → implication
+```
+
+rather than a flat star around the paper node. They encode the assumption that a
+paper's method yields its result and its result backs every piece of evidence it
+reports — the LLM summary does not state which evidence came from which result,
+so the builder wires them completely.
+
+**Evidence is a link in the chain, not a leaf.** It sits *between* the result and
+the claim it bears on, so the edge runs `evidence → claim` and the relation is
+named `supports` (not `supported_by`, which would read backwards now that the
+claim is the destination). Two consequences:
+
+- `contradicting_evidence` is **not read into the graph at all**. Every evidence
+  node is supporting evidence, so there is one polarity and one path per claim.
+- A claim with no supporting evidence is reachable only through `has_claim` — it
+  sits off the chain. `coverage_report()` counts these as
+  `claims_without_evidence`, and the builder prints the count; it is 0 or near-0
+  on every corpus built so far.
 
 Node rows are assigned in corpus order (files read in sorted order), so the
 tables are deterministic given the same inputs.
@@ -127,7 +145,7 @@ because each paper is a disconnected component of that subgraph.
   `T.ToUndirected()`, which synthesises `rev_cites`, so materialising a
   `cited_by` relation here would double those edges. `build_sample.py` writes a
   derived `cited_by` list into `subgraphs.jsonl` for reading convenience; it is
-  not an eleventh edge type.
+  not a tenth edge type.
 - **Citations are sparse, and three things are dropped.** `dangling` —
   references whose OpenAlex id is not in the corpus (the overwhelming majority:
   126,559 of 127,176 in the materials-science slice). `self-citations` — some
@@ -280,13 +298,13 @@ record with several lines of indentation. Both files still load with a plain
 `json.load`, and stay line-diffable. `stats.json` is small and keeps its
 indenting.
 
-The shipped sample is 3 real PubMed papers → **55 nodes, 70 edges**:
+The shipped sample is 3 real PubMed papers → **49 nodes, 64 edges**:
 
 ```
-paper 3   field 1   claim 13   method 3   result 3   evidence 19   implication 13
+paper 3   field 1   claim 13   method 3   result 3   evidence 13   implication 13
 
 has_claim 13   has_method 3   has_result 3   in_field 3   cites 0
-supported_by 13   challenged_by 6   implies 13   produces 3   grounds 13
+produces 3   grounds 13   supports 13   implies 13
 ```
 
 `cites` is 0 because the sample's only intra-corpus reference was a

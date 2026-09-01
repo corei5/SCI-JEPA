@@ -6,12 +6,17 @@ WHAT THIS BUILDS
 =============================================================================
 ONE big HeteroData graph in which EACH PAPER is an internal reasoning
 SUBGRAPH. Instead of a flat "paper -> aspect" star, a paper's aspects are
-wired to each other, mirroring scientific structure:
+wired into a single CHAIN, mirroring scientific structure:
 
-        method --produces--> result --grounds--> claim
-        claim  --supported_by---> evidence
-        claim  --challenged_by--> evidence
-        claim  --implies--------> implication
+        method --produces--> result --grounds--> evidence
+        evidence --supports--> claim --implies--> implication
+
+i.e. paper -> method -> result -> evidence -> claim -> implication.
+
+Evidence is a link in that chain, not a leaf hanging off a claim: a result
+grounds the evidence, and the evidence is what supports the claim. Only
+SUPPORTING evidence is represented — `contradicting_evidence` is not read into
+the graph, so there is exactly one polarity and one path through each paper.
 
 All paper subgraphs share ONE graph and are connected to each other via
 `in_field` (shared field hubs) and `cites` (intra-corpus citations).
@@ -30,7 +35,7 @@ NODES
     claim       : MiniLM(claim.details | claim.description)   [many / paper]
     method      : MiniLM(methodological_details | procedures) [~1 / paper]
     result      : MiniLM(key_results)                         [~1 / paper]
-    evidence    : MiniLM(supporting/contradicting evidence)   [many / claim]
+    evidence    : MiniLM(claim.supporting_evidence)           [many / claim]
     implication : MiniLM(claim.implications)                  [many / claim]
     field       : MiniLM(field_subfield string)               [shared hubs]
 
@@ -44,12 +49,11 @@ EDGES
     (paper,  in_field,       field)
     (paper,  cites,          paper)     # intra-corpus only; dangling dropped
 
-  Intra-paper reasoning subgraph (aspects wired to each other):
-    (claim,  supported_by,   evidence)  # from supporting_evidence
-    (claim,  challenged_by,  evidence)  # from contradicting_evidence
-    (claim,  implies,        implication)
-    (method, produces,       result)    # imposed method->result structure
-    (result, grounds,        claim)     # imposed result->claim structure
+  Intra-paper reasoning chain (aspects wired to each other, in order):
+    (method,   produces,  result)       # imposed method->result structure
+    (result,   grounds,   evidence)     # imposed result->evidence structure
+    (evidence, supports,  claim)        # from supporting_evidence
+    (claim,    implies,   implication)
 
 =============================================================================
 RECORD FORMATS HANDLED
@@ -151,8 +155,15 @@ def build_hetero_graph(raw_dir, cache_path,
         if n == 0:
             print(f"[paper_graph] ★ WARNING: 0 '{name}' found — check field names/format.")
     if cov["total_evidence"] == 0:
-        print("[paper_graph] ★ WARNING: 0 evidence nodes — supporting/contradicting"
-              " fields missing; subgraph will lack evidence edges.")
+        print("[paper_graph] ★ WARNING: 0 evidence nodes — supporting_evidence"
+              " missing; the chain breaks at result and no claim is reachable"
+              " from it.")
+    elif cov["claims_without_evidence"]:
+        # Evidence is now the ONLY route from a result to a claim, so a claim
+        # with none is attached by `has_claim` alone. Worth saying out loud.
+        print(f"[paper_graph] note: {cov['claims_without_evidence']}/"
+              f"{cov['total_claims']} claims have no supporting evidence and so "
+              f"sit off the result->evidence->claim chain.")
 
     # ---------------- flatten nodes + typed edges ----------------
     tables = build_tables(papers)

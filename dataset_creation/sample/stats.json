@@ -16,8 +16,9 @@
     "papers_with_method": 3,
     "papers_with_result": 3,
     "total_claims": 13,
-    "total_evidence": 19,
-    "total_implications": 13
+    "total_evidence": 13,
+    "total_implications": 13,
+    "claims_without_evidence": 0
   },
   "nodes": {
     "paper": 3,
@@ -25,23 +26,22 @@
     "claim": 13,
     "method": 3,
     "result": 3,
-    "evidence": 19,
+    "evidence": 13,
     "implication": 13
   },
-  "total_nodes": 55,
+  "total_nodes": 49,
   "edges": {
     "paper__has_claim__claim": 13,
     "paper__has_method__method": 3,
     "paper__has_result__result": 3,
     "paper__in_field__field": 3,
     "paper__cites__paper": 0,
-    "claim__supported_by__evidence": 13,
-    "claim__challenged_by__evidence": 6,
-    "claim__implies__implication": 13,
     "method__produces__result": 3,
-    "result__grounds__claim": 13
+    "result__grounds__evidence": 13,
+    "evidence__supports__claim": 13,
+    "claim__implies__implication": 13
   },
-  "total_edges": 70,
+  "total_edges": 64,
   "dangling_citations_dropped": 56,
   "citations": {
     "directed": true,

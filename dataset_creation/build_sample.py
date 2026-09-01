@@ -87,13 +87,15 @@ def build_sample(raw_dir, out_dir, limit=None, coarse_label=True, snippet=None,
     n_edges = sum(len(v[0]) for v in edges.values())
 
     # ---------------- per-paper nested subgraphs ----------------
-    # claim -> its evidence / implications, so a subgraph reads top-down.
-    claim_support, claim_contra, claim_impl = {}, {}, {}
-    for key, bucket in ((("claim", "supported_by", "evidence"), claim_support),
-                        (("claim", "challenged_by", "evidence"), claim_contra),
-                        (("claim", "implies", "implication"), claim_impl)):
-        for c, e in zip(*edges[key]):
-            bucket.setdefault(c, []).append(e)
+    # claim -> its evidence / implications, so a subgraph still reads top-down
+    # even though `supports` points the other way (evidence -> claim): the
+    # evidence edge is bucketed by its DESTINATION, the implies edge by its
+    # source. The nesting is a reading convenience, not the edge direction.
+    claim_evidence, claim_impl = {}, {}
+    for e, c in zip(*edges[("evidence", "supports", "claim")]):
+        claim_evidence.setdefault(c, []).append(e)
+    for c, m in zip(*edges[("claim", "implies", "implication")]):
+        claim_impl.setdefault(c, []).append(m)
 
     method_of = {o: k for k, o in enumerate(owner["method"])}
     result_of = {o: k for k, o in enumerate(owner["result"])}
@@ -126,15 +128,12 @@ def build_sample(raw_dir, out_dir, limit=None, coarse_label=True, snippet=None,
                 dict(
                     id=node_id("claim", c),
                     text=cut(texts["claim"][c]),
-                    supported_by=[dict(id=node_id("evidence", e),
-                                       text=cut(texts["evidence"][e]))
-                                  for e in claim_support.get(c, [])],
-                    challenged_by=[dict(id=node_id("evidence", e),
-                                        text=cut(texts["evidence"][e]))
-                                   for e in claim_contra.get(c, [])],
-                    implies=[dict(id=node_id("implication", m),
-                                  text=cut(texts["implication"][m]))
-                             for m in claim_impl.get(c, [])],
+                    evidence=[dict(id=node_id("evidence", e),
+                                   text=cut(texts["evidence"][e]))
+                              for e in claim_evidence.get(c, [])],
+                    implications=[dict(id=node_id("implication", m),
+                                       text=cut(texts["implication"][m]))
+                                  for m in claim_impl.get(c, [])],
                 )
                 for c in claims_of.get(pi, [])
             ],

@@ -14,7 +14,7 @@ for a physics simulation to discover.
 So this module takes the opposite approach:
 
   * **Deterministic tiled layout.** Every paper gets a fixed cell, laid out along
-    its reasoning chain (method -> result -> claim -> evidence/implication) using
+    its reasoning chain (method -> result -> evidence -> claim -> implication) using
     the *same* algorithm as visualize.instance_svg. Cells are packed into one
     block per field. No physics, no layout library, no randomness.
   * **Nothing is positioned in Python.** The browser regenerates the layout from a
@@ -88,11 +88,14 @@ def build_structure(nodes, edges):
         has_result    paper -> r
         produces      m     -> r
         has_claim     paper -> each claim
-        grounds       r     -> each claim
-        supported_by  claim -> each id in its `s` list
-        challenged_by claim -> each id in its `h` list
+        grounds       r     -> each id in every claim's `s` list
+        supports      each id in a claim's `s` list -> that claim
         implies       claim -> each id in its `p` list
         in_field      paper -> f
+
+    `s` is the claim's supporting evidence. It is stored under the claim purely
+    because that is the compact way to write it down — the edges themselves run
+    result -> evidence -> claim, i.e. through the evidence, not around it.
 
     Only `cites` is genuinely irregular, so it stays an explicit pair list.
 
@@ -106,10 +109,11 @@ def build_structure(nodes, edges):
     # ---- bucket the edges we need, keyed by source id
     method_of, result_of, field_of = {}, {}, {}
     claims_of = {}
-    leaves_of = {}          # claim id -> {"s": [...], "h": [...], "p": [...]}
+    leaves_of = {}          # claim id -> {"s": [evidence...], "p": [implication...]}
     cites = []
 
-    leaf_key = {"supported_by": "s", "challenged_by": "h", "implies": "p"}
+    def leaves(cid):
+        return leaves_of.setdefault(cid, {"s": [], "p": []})
 
     for e in edges:
         rel, src, dst = e["rel"], e["src"], e["dst"]
@@ -121,21 +125,25 @@ def build_structure(nodes, edges):
             field_of[src] = dst
         elif rel == "has_claim":
             claims_of.setdefault(src, []).append(dst)
-        elif rel in leaf_key:
-            leaves_of.setdefault(src, {"s": [], "h": [], "p": []})[leaf_key[rel]].append(dst)
+        elif rel == "supports":
+            # evidence -> claim, so the CLAIM is the destination here
+            leaves(dst)["s"].append(src)
+        elif rel == "implies":
+            leaves(src)["p"].append(dst)
         elif rel == "cites":
             cites.append((local[src], local[dst]))
+        # `grounds` (result -> evidence) is not stored: it is implied by the
+        # paper's result plus the evidence already listed under each claim.
 
     papers = [n["id"] for n in nodes if n["type"] == "paper"]
     out = []
     for p in papers:
         claim_rows = []
         for c in claims_of.get(p, []):
-            lv = leaves_of.get(c, {"s": [], "h": [], "p": []})
+            lv = leaves_of.get(c, {"s": [], "p": []})
             claim_rows.append([
                 local[c],
                 [local[x] for x in lv["s"]],
-                [local[x] for x in lv["h"]],
                 [local[x] for x in lv["p"]],
             ])
         out.append([
@@ -427,7 +435,7 @@ class TextTable {
    (the same rule visualize.instance_svg uses).  Cells are packed into a
    roughly square block per field, and the blocks sit side by side.
    ===================================================================== */
-const CELL_W = 1650, CELL_H = 1040;
+const CELL_W = 2000, CELL_H = 1040;
 const PITCH_X = CELL_W + 250, PITCH_Y = CELL_H + 240;
 const BLOCK_GAP = PITCH_X * 2.2, BLOCK_HEAD = PITCH_Y * 0.75;
 const LEAF_PITCH = 46, CLAIM_GAP = 14;
@@ -435,10 +443,12 @@ const LEAF_PITCH = 46, CLAIM_GAP = 14;
 /* column x offset and box width, in world units, per node type.
    A node's stored `x` is always the LEFT edge of its box.  Dots are drawn at the
    box centre and edges run right-edge -> left-edge, so the two level-of-detail
-   modes line up instead of drifting apart as you zoom. */
+   modes line up instead of drifting apart as you zoom.
+   Column order is the reasoning chain: evidence sits between result and claim,
+   and implication is the only leaf column. */
 const COL = {
   paper:       [  40, 250], method:      [ 330, 250], result:      [ 620, 250],
-  claim:       [ 910, 290], evidence:    [1250, 330], implication: [1250, 330],
+  evidence:    [ 910, 300], claim:       [1260, 290], implication: [1600, 330],
   field:       [   0, 520],
 };
 const cx_of = (n) => n.x + COL[n.t][1] / 2;      // centre  (dots, hit test)
@@ -509,28 +519,24 @@ function layoutOf(pi) {
   let L = LAYOUT.get(pi);
   if (L) return L;
 
-  const [fieldIdx, mLocal, rLocal, claims] = S.papers[pi];
+  const [fieldIdx, mLocal, rLocal, claims] = S.papers[pi];   /* claim = [local, evidence[], implication[]] */
   const nodes = [], edges = [];
   const push = (t, base, local, x, y) =>
     nodes.push({ t, x, y, ti: base + local, local }) - 1;
 
-  /* vertical pass: leaves first, then parents centred on their children */
+  /* vertical pass: rows first, then the claim centred on its own rows.
+     A claim's evidence (left of it) and implications (right of it) SHARE the
+     rows it reserves — they are in different columns, so the block is only as
+     tall as the taller of the two stacks. */
   let cursor = 0;
   const claimY = [];
   const leafRows = [];
-  for (const [cLocal, sup, cha, imp] of claims) {
-    const leaves = [];
-    for (const e of sup) leaves.push(["evidence", BASE.evidence, e, "supported_by"]);
-    for (const e of cha) leaves.push(["evidence", BASE.evidence, e, "challenged_by"]);
-    for (const e of imp) leaves.push(["implication", BASE.implication, e, "implies"]);
+  for (const [cLocal, sup, imp] of claims) {
+    const rows = Math.max(sup.length, imp.length, 1);
     const ys = [];
-    if (leaves.length) {
-      for (let k = 0; k < leaves.length; k++) { ys.push(cursor); cursor += LEAF_PITCH; }
-    } else {
-      ys.push(cursor); cursor += LEAF_PITCH;
-    }
-    claimY.push(ys.reduce((a, b) => a + b, 0) / ys.length);
-    leafRows.push([leaves, ys]);
+    for (let k = 0; k < rows; k++) { ys.push(cursor); cursor += LEAF_PITCH; }
+    claimY.push((ys[0] + ys[rows - 1]) / 2);
+    leafRows.push([sup, imp, ys]);
     cursor += CLAIM_GAP;
   }
   const contentH = Math.max(cursor, LEAF_PITCH);
@@ -553,11 +559,16 @@ function layoutOf(pi) {
   claims.forEach(([cLocal], ci) => {
     const iClaim = push("claim", BASE.claim, cLocal, COL.claim[0], Y(claimY[ci]));
     edges.push([iPaper, iClaim, "has_claim"]);
-    if (iResult >= 0) edges.push([iResult, iClaim, "grounds"]);
-    const [leaves, ys] = leafRows[ci];
-    leaves.forEach(([t, base, local, rel], li) => {
-      const iLeaf = push(t, base, local, COL[t][0], Y(ys[li]));
-      edges.push([iClaim, iLeaf, rel]);
+    const [sup, imp, ys] = leafRows[ci];
+    /* the chain reaches the claim THROUGH its evidence: result -> evidence -> claim */
+    sup.forEach((local, li) => {
+      const iEv = push("evidence", BASE.evidence, local, COL.evidence[0], Y(ys[li]));
+      if (iResult >= 0) edges.push([iResult, iEv, "grounds"]);
+      edges.push([iEv, iClaim, "supports"]);
+    });
+    imp.forEach((local, li) => {
+      const iImp = push("implication", BASE.implication, local, COL.implication[0], Y(ys[li]));
+      edges.push([iClaim, iImp, "implies"]);
     });
   });
 
@@ -1074,8 +1085,8 @@ function openDetail(hit) {
   if (!n) return;
   const s = S.papers[hit.pi];
   const nClaims = s[3].length;
-  const nEv = s[3].reduce((a, c) => a + c[1].length + c[2].length, 0);
-  const nImp = s[3].reduce((a, c) => a + c[3].length, 0);
+  const nEv = s[3].reduce((a, c) => a + c[1].length, 0);   /* c = [local, evidence[], implication[]] */
+  const nImp = s[3].reduce((a, c) => a + c[2].length, 0);
 
   const badge = document.getElementById("dBadge");
   badge.textContent = n.t;

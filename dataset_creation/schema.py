@@ -37,21 +37,40 @@ SUMMARY_FIELD_TO_TYPE = {
 # Claim-object sub-fields that hold the primary claim text.
 CLAIM_TEXT_FIELDS = ("details", "description")   # A/B: 'details', C: 'description'
 
+# NOTE: `contradicting_evidence` is deliberately NOT read. Evidence nodes come
+# from `supporting_evidence` only — see EDGE_TYPES below.
+
 # Node types in the graph, in the order they are reported.
 NODE_TYPES = ("paper", "field", "claim", "method", "result", "evidence", "implication")
 
 # (src, relation, dst) triples the builder can emit, and their RDF property name.
+#
+# The four reasoning relations form ONE chain per paper:
+#
+#     method --produces--> result --grounds--> evidence --supports--> claim
+#                                                                       |
+#                                                            implies    v
+#                                                              implication
+#
+# Evidence sits BETWEEN the result and the claim it bears on, rather than
+# hanging off the claim as a leaf. Direction is "what licenses what": a result
+# grounds the evidence, and the evidence is what supports the claim. This is
+# why the relation is named `supports` and not `supported_by` — the claim is
+# the DESTINATION now, so the passive name would read backwards.
+#
+# There is no `challenges` counterpart: `contradicting_evidence` is not read
+# into the graph at all, so every evidence node is supporting evidence and the
+# chain has exactly one path through it.
 EDGE_TYPES = (
-    ("paper",  "has_claim",     "claim",       "hasClaim"),
-    ("paper",  "has_method",    "method",      "hasMethod"),
-    ("paper",  "has_result",    "result",      "hasResult"),
-    ("paper",  "in_field",      "field",       "inField"),
-    ("paper",  "cites",         "paper",       "cites"),
-    ("claim",  "supported_by",  "evidence",    "supportedBy"),
-    ("claim",  "challenged_by", "evidence",    "challengedBy"),
-    ("claim",  "implies",       "implication", "implies"),
-    ("method", "produces",      "result",      "produces"),
-    ("result", "grounds",       "claim",       "grounds"),
+    ("paper",    "has_claim",  "claim",       "hasClaim"),
+    ("paper",    "has_method", "method",      "hasMethod"),
+    ("paper",    "has_result", "result",      "hasResult"),
+    ("paper",    "in_field",   "field",       "inField"),
+    ("paper",    "cites",      "paper",       "cites"),
+    ("method",   "produces",   "result",      "produces"),
+    ("result",   "grounds",    "evidence",    "grounds"),
+    ("evidence", "supports",   "claim",       "supports"),
+    ("claim",    "implies",    "implication", "implies"),
 )
 
 
@@ -196,15 +215,18 @@ def _get_claims_list(summary, paper):
 def _claim_records(summary, paper):
     """
     Return one dict per claim:
-        {text, supporting[list[str]], contradicting[list[str]], implications[list[str]]}
+        {text, supporting[list[str]], implications[list[str]]}
     Empty sub-fields become empty lists. Plain-string claims are also accepted.
+
+    `contradicting_evidence` is read from neither format: the graph carries only
+    supporting evidence, so there is exactly one evidence polarity and one path
+    result -> evidence -> claim.
     """
     out = []
     for c in _get_claims_list(summary, paper):
         if isinstance(c, str):
             if c.strip():
-                out.append(dict(text=c.strip(), supporting=[],
-                                contradicting=[], implications=[]))
+                out.append(dict(text=c.strip(), supporting=[], implications=[]))
             continue
         if not isinstance(c, dict):
             continue
@@ -229,7 +251,6 @@ def _claim_records(summary, paper):
         out.append(dict(
             text=text,
             supporting=as_list("supporting_evidence"),
-            contradicting=as_list("contradicting_evidence"),
             implications=as_list("implications"),
         ))
     return out
@@ -316,7 +337,7 @@ def parse_records(raw_dir, coarse_label=True, limit=None, progress=True,
 
     Each element of `papers` is::
 
-        {pid, text, claims[{text, supporting, contradicting, implications}],
+        {pid, text, claims[{text, supporting, implications}],
          method, result, field, refs}
 
     A record is SKIPPED when it has no usable summary/field label (typically a
@@ -433,7 +454,15 @@ def parse_records(raw_dir, coarse_label=True, limit=None, progress=True,
 
 
 def coverage_report(papers, skipped):
-    """Counts printed by the builder so you can see whether the schema matched."""
+    """
+    Counts printed by the builder so you can see whether the schema matched.
+
+    `claims_without_evidence` is the one to watch. A claim now reaches the rest
+    of its paper's chain only THROUGH its evidence (result -> evidence -> claim),
+    so a claim with no supporting_evidence hangs off `has_claim` alone. It is 0
+    on the corpora built so far; if it ever climbs, the chain is not the shape
+    the schema advertises.
+    """
     return dict(
         num_papers=len(papers),
         skipped=skipped,
@@ -441,10 +470,12 @@ def coverage_report(papers, skipped):
         papers_with_method=sum(1 for p in papers if p["method"]),
         papers_with_result=sum(1 for p in papers if p["result"]),
         total_claims=sum(len(p["claims"]) for p in papers),
-        total_evidence=sum(len(c["supporting"]) + len(c["contradicting"])
+        total_evidence=sum(len(c["supporting"])
                            for p in papers for c in p["claims"]),
         total_implications=sum(len(c["implications"])
                                for p in papers for c in p["claims"]),
+        claims_without_evidence=sum(1 for p in papers for c in p["claims"]
+                                    if not c["supporting"]),
     )
 
 
@@ -475,10 +506,12 @@ def build_tables(papers):
     field_map = {f: i for i, f in enumerate(fields_sorted)}
 
     # ---------------- flatten nodes + intra-paper edges ----------------
+    # Evidence is a LINK in the chain, not a leaf: an evidence node's edge runs
+    # evidence -> claim, so the claim is the destination and `sup_src` holds the
+    # evidence row. (Before, this ran claim -> evidence.)
     claim_texts, claim_owner = [], []
     evid_texts, evid_owner = [], []
-    ev_support_src, ev_support_dst = [], []      # (claim, supported_by, evidence)
-    ev_contra_src,  ev_contra_dst  = [], []      # (claim, challenged_by, evidence)
+    sup_src, sup_dst = [], []                    # (evidence, supports, claim)
     impl_texts, impl_owner = [], []
     impl_src, impl_dst = [], []                  # (claim, implies, implication)
 
@@ -488,13 +521,8 @@ def build_tables(papers):
             claim_texts.append(c["text"])
             claim_owner.append(i)
             for e in c["supporting"]:
-                ev_support_src.append(cidx)
-                ev_support_dst.append(len(evid_texts))
-                evid_texts.append(e)
-                evid_owner.append(i)
-            for e in c["contradicting"]:
-                ev_contra_src.append(cidx)
-                ev_contra_dst.append(len(evid_texts))
+                sup_src.append(len(evid_texts))
+                sup_dst.append(cidx)
                 evid_texts.append(e)
                 evid_owner.append(i)
             for im in c["implications"]:
@@ -514,7 +542,12 @@ def build_tables(papers):
             result_owner.append(i)
             result_texts.append(p["result"])
 
-    # intra-paper structural edges: method->produces->result, result->grounds->claim
+    # intra-paper structural edges: method->produces->result, result->grounds->evidence.
+    # Both are IMPOSED — the LLM summary never says which evidence came from
+    # which result, so a paper's single result is wired to all of its evidence.
+    # `grounds` lands on EVIDENCE (not, as before, straight onto the claims):
+    # that is what turns the paper into the longer chain
+    # method -> result -> evidence -> claim -> implication.
     method_row = {mo: k for k, mo in enumerate(method_owner)}   # paper idx -> method node idx
     result_row = {ro: k for k, ro in enumerate(result_owner)}   # paper idx -> result node idx
     prod_src, prod_dst = [], []                                 # (method, produces, result)
@@ -522,11 +555,11 @@ def build_tables(papers):
         if pi in method_row and pi in result_row:
             prod_src.append(method_row[pi])
             prod_dst.append(result_row[pi])
-    grnd_src, grnd_dst = [], []                                 # (result, grounds, claim)
-    for cidx, owner in enumerate(claim_owner):
+    grnd_src, grnd_dst = [], []                                 # (result, grounds, evidence)
+    for eidx, owner in enumerate(evid_owner):
         if owner in result_row:
             grnd_src.append(result_row[owner])
-            grnd_dst.append(cidx)
+            grnd_dst.append(eidx)
 
     # ---------------- paper-level edges ----------------
     inf_src = list(range(len(papers)))
@@ -566,16 +599,15 @@ def build_tables(papers):
         return list(owner_list), list(range(len(owner_list)))
 
     edges = {
-        ("paper",  "has_claim",     "claim"):       owner_edge(claim_owner),
-        ("paper",  "has_method",    "method"):      owner_edge(method_owner),
-        ("paper",  "has_result",    "result"):      owner_edge(result_owner),
-        ("paper",  "in_field",      "field"):       (inf_src, inf_dst),
-        ("paper",  "cites",         "paper"):       (cites_src, cites_dst),
-        ("claim",  "supported_by",  "evidence"):    (ev_support_src, ev_support_dst),
-        ("claim",  "challenged_by", "evidence"):    (ev_contra_src,  ev_contra_dst),
-        ("claim",  "implies",       "implication"): (impl_src, impl_dst),
-        ("method", "produces",      "result"):      (prod_src, prod_dst),
-        ("result", "grounds",       "claim"):       (grnd_src, grnd_dst),
+        ("paper",    "has_claim",  "claim"):       owner_edge(claim_owner),
+        ("paper",    "has_method", "method"):      owner_edge(method_owner),
+        ("paper",    "has_result", "result"):      owner_edge(result_owner),
+        ("paper",    "in_field",   "field"):       (inf_src, inf_dst),
+        ("paper",    "cites",      "paper"):       (cites_src, cites_dst),
+        ("method",   "produces",   "result"):      (prod_src, prod_dst),
+        ("result",   "grounds",    "evidence"):    (grnd_src, grnd_dst),
+        ("evidence", "supports",   "claim"):       (sup_src, sup_dst),
+        ("claim",    "implies",    "implication"): (impl_src, impl_dst),
     }
 
     return dict(
