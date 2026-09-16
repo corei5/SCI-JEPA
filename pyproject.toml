@@ -30,3 +30,12 @@ analysis = [
 # The repo is a set of runnable packages (`dataset_creation/`, `Analysis/core`,
 # `Analysis/train`), not a distributable library, so don't try to build it.
 package = false
+
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.setuptools.packages.find]
+where = ["./src"]

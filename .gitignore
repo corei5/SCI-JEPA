@@ -7,3 +7,9 @@ __pycache__/
 # HF / model caches
 _hf_cache/
 _st_cache/
+
+# Embedding caches written by scripts/poc/train_kg.py
+scripts/poc/cache/
+
+# Standalone HTML session reports
+scripts/poc/sci_jepa_log_*.html
