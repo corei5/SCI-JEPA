@@ -13,4 +13,4 @@ _mpl_cache/
 scripts/poc/cache/
 
 # Standalone HTML session reports
-scripts/poc/sci_jepa_log_*.html
+scripts/poc/experimental_logs_html/
