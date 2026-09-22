@@ -14,3 +14,9 @@ scripts/poc/cache/
 
 # Standalone HTML session reports
 scripts/poc/experimental_logs_html/
+
+# Sweep and seed-run outputs; only the summary table is committed
+scripts/poc/grid/**
+!scripts/poc/grid/*/
+!scripts/poc/grid/*/table.md
+scripts/poc/seeds/
