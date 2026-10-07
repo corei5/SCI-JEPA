@@ -20,3 +20,8 @@ scripts/poc/grid/**
 !scripts/poc/grid/*/
 !scripts/poc/grid/*/table.md
 scripts/poc/seeds/
+
+# Graph-input JEPA runs (checkpoints, logs, plots); only each run's results.tsv is committed
+scripts/poc/graph_runs/**
+!scripts/poc/graph_runs/*/
+!scripts/poc/graph_runs/*/results.tsv
