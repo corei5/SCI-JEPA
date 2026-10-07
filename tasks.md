@@ -21,3 +21,7 @@ Claim:  Sine(2*pi*0.5t) - (1, 512)
 
 Input: [BS, 2, 512]
 Output: [BS, 512]
+
+## 22.09.2026
+* Lokesh and Sasi disagree on the subencoder implementation.
+ - We need to revisit whether we do require subencoder for sure or does it make sense to add it than training with a single graph context encoder in JEPA.
