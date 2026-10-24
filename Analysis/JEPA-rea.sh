@@ -52,6 +52,9 @@ conda activate kgjepa || { echo "Conda environment activation failed"; exit 1; }
 cd "${PROJECT_DIR}"
 
 export PYTHONUNBUFFERED=1
+export SCIJEPA_DATA_ROOT="${SCIJEPA_DATA_ROOT:-${PROJECT_DIR}/dataset}"
+export SCIJEPA_CHECKPOINT_ROOT="${SCIJEPA_CHECKPOINT_ROOT:-${PROJECT_DIR}/checkpoints/reasoning}"
+export SCIJEPA_DASHBOARD_ROOT="${SCIJEPA_DASHBOARD_ROOT:-}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export HF_HOME="${PROJECT_DIR}/_hf_cache"
 export SENTENCE_TRANSFORMERS_HOME="${PROJECT_DIR}/_st_cache"

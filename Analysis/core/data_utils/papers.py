@@ -150,7 +150,8 @@ class PapersDataset(InMemoryDataset):
         self.min_class_size = int(min_class_size)   # drop classes below this count
         self.label_map = {}                          # label_string -> int id
         super().__init__(root, transform, pre_transform)
-        self.data, self.slices = torch.load(self.processed_paths[0])
+        # own cache of PyG objects: torch>=2.6 defaults to weights_only=True, which rejects them
+        self.data, self.slices = torch.load(self.processed_paths[0], weights_only=False)
         # restore label_map saved alongside the processed data
         meta_path = os.path.join(self.processed_dir, "label_map.json")
         if os.path.exists(meta_path):

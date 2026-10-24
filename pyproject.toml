@@ -1,0 +1,41 @@
+[project]
+name = "graph-jepa"
+version = "0.2.0"
+description = "Graph-JEPA pretraining. Paper A stays the sci-jepa package in SCI-JEPA-training."
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "einops>=0.8",
+    "lightning>=2.4",
+    "networkx>=3.2",
+    "numpy>=1.26",
+    "pyyaml>=6",
+    "scikit-learn>=1.4",
+    "tensorboard>=2.16",
+    "torch>=2.2",
+    "torch-geometric>=2.6",
+    "tqdm>=4.66",
+    "yacs>=0.1.8",
+]
+
+[project.optional-dependencies]
+data = ["sentence-transformers>=3.0"]
+
+[project.scripts]
+graph-jepa = "core.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["Analysis"]
+include = ["core*", "train*", "diag*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["Analysis"]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+

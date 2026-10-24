@@ -1,0 +1,2 @@
+[console_scripts]
+sci-jepa = sci_jepa.cli:main

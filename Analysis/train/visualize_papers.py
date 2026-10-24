@@ -8,7 +8,7 @@ from sklearn.metrics import confusion_matrix, accuracy_score
 from sklearn.manifold import TSNE
 from torch_geometric.loader import DataLoader
 
-from core.config import cfg, update_cfg
+from core.config import cfg, update_cfg, resolve_config
 from core.get_data import create_dataset
 from core.get_model import create_model
 
@@ -28,7 +28,7 @@ def extract_embeddings(model, loader, device):
 
 
 def main():
-    cfg.merge_from_file('train/configs/papers.yaml')
+    cfg.merge_from_file(resolve_config('train/configs/papers.yaml'))
     update_cfg(cfg)
     device = torch.device(f'cuda:{cfg.device}' if torch.cuda.is_available() else 'cpu')
 

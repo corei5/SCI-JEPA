@@ -1,0 +1,13 @@
+---
+description: graphify knowledge graph context and repository rules
+alwaysApply: true
+---
+
+Project rules and the repository map are in AGENTS.md and ARCHITECTURE.md at the repository root. Follow them.
+
+This project has a graphify knowledge graph in graphify-out/. The `graphify` MCP server (.cursor/mcp.json) exposes it as tools.
+
+- For a codebase or architecture question, query the graph before your first grep or file read: `graphify query "<question>"`, `graphify path "<A>" "<B>"`, `graphify explain "<concept>"`. Put the same instruction in any subagent prompt that explores code.
+- Read raw files once the graph has located the lines you need, or when graphify-out/graph.json does not exist.
+- Community names and the per-area diagrams are in graphify-out/GRAPH_REPORT.md and graphify-out/ARCHITECTURE.html; use them for broad orientation.
+- After modifying code, run `graphify update .` (AST only, no API cost). Dirty graphify-out/ files after hooks are expected.

@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sci-jepa"
+version = "0.1.0"
+description = "SCI-JEPA (Paper A): joint-embedding predictive learning and a reasoning benchmark over scientific knowledge units"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.4",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "scikit-learn>=1.3",
+    "pandas>=2.0",
+    "pyarrow>=14",
+    "matplotlib>=3.7",
+    "safetensors>=0.4",
+    "transformers>=4.45",
+    "sentence-transformers>=3.0",
+    "nvidia-ml-py>=12",                          # GPU monitoring (sci_jepa.infra)
+    "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+llm = ["accelerate>=0.30"]                       # LLM-Reasoning comparison system
+notebook = ["ipykernel", "nbconvert"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+sci-jepa = "sci_jepa.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sci_jepa = ["dashboard/dashboard.html", "dashboard/infra.html", "dashboard/vendor/*.js", "models/placeholder_shapes.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: takes minutes (the full synthetic smoke test)",
+    "logic: normalizer logic on synthetic parquet files (no data needed)",
+]

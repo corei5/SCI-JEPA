@@ -16,29 +16,22 @@ Rank-2-Trap builds a heterogeneous knowledge graph from a corpus of scientific p
 
 ---
 
-## 📁 Repository Structure (Need to fix)
+## 📁 Repository Structure
 
 ```
-Rank-2-Trap/
-├── core/                       # Core library
-│   ├── config.py               # Config system (cfg, update_cfg)
-│   ├── get_data.py             # Dataset creation + stats
-│   └── data_utils/
-│       └── paper_graph.py      # build_hetero_graph(): raw JSON → hetero graph
-├── dataset/
-│   └── papers/
-│       ├── raw/                # Raw paper .json files (input)
-│       └── processed/          # Cached tensors (hetero graph, RWSE PE, etc.)
-├── train/
-│   ├── configs/
-│   │   └── papers.yaml         # Main training config
-│   ├── papers.py               # Part 1: Graph-JEPA self-supervised training
-│   ├── paper_reason.py         # Part 2: reasoning + link prediction
-│   ├── build_rwse.py           # Part 3a: schema analysis + RWSE positional encodings
-│   └── paper_reason_gjepa.py   # Part 3b: faithful Graph-JEPA (GINE + masked JEPA)
-├── JEPA-rea.sh                 # End-to-end SLURM pipeline (Parts 1–3)
-└── README.md
+SCI-JEPA/
+├── pyproject.toml              # uv project (Lightning, PyG, TensorBoard)
+├── Analysis/
+│   ├── core/                   # model, data, Lightning trainer, dashboard
+│   ├── train/                  # dataset entrypoints and YAML configs (file map: train/README.md)
+│   ├── diag/                   # rebuttal diagnostics
+│   ├── dataset/papers/         # raw JSON and cached tensors
+│   └── JEPA-rea.sh             # SLURM pipeline
+├── runs/                       # Lightning JSONL logs (created on train)
+└── graphify-out/               # codebase knowledge graph
 ```
+
+See [train/README.md](train/README.md) for what each `train/` script does; several `paper_reason*` names no longer match their contents. The repository-wide map is [ARCHITECTURE.md](../ARCHITECTURE.md).
 
 ---
 
@@ -60,17 +53,16 @@ Each stage caches its output to `dataset/papers/processed/`, so later stages can
 
 ### 1. Environment
 
-```bash
-conda create -n kgjepa python=3.10
-conda activate kgjepa
+From the repository root (the directory that contains `pyproject.toml`):
 
-# Install PyTorch (match your CUDA version) and PyG
-pip install torch
-pip install torch_geometric
-pip install sentence-transformers transformers
+```bash
+uv sync
+uv sync --extra data
 ```
 
-> The pipeline uses `sentence-transformers` / Hugging Face models for node embeddings, and PyTorch Geometric for graph learning.
+The training entrypoints default to PyTorch Lightning and write into the dashboard in `SCI-JEPA-training` (`uv run graph-jepa dashboard`). See the root [README](../README.md) for multi-GPU runs and `SCIJEPA_DASHBOARD_ROOT`.
+
+A conda environment still works if you install the same libraries (`torch`, `torch-geometric`, `lightning`, `yacs`, `scikit-learn`). The SLURM script activates `kgjepa` and exports `SCIJEPA_DATA_ROOT`.
 
 ### 2. Data
 

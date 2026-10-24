@@ -1,0 +1,41 @@
+# Python and environments
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+dist/
+build/
+
+# OS and editors
+.DS_Store
+.vscode/
+.idea/
+.claude/settings.local.json
+
+# Training outputs (never commit)
+runs/
+results/
+logs/
+log/
+checkpoints/
+lightning_logs/
+wandb/
+_hf_cache/
+_st_cache/
+
+# Raw data stays on disk or the cluster; the small processed caches already
+# tracked under Analysis/dataset/papers/ are kept.
+Analysis/dataset/**/raw/
+
+# Graphify: keep graph.json, the report, labels and the human views;
+# ignore caches and the 2.4 MB graph.html that every rebuild regenerates.
+graphify-out/cache/
+graphify-out/manifest.json
+graphify-out/graph.html
+graphify-out/.graphify_analysis.json
+graphify-out/.graphify_labels.pending.json
+graphify-out/.graphify_root
+.graphify/

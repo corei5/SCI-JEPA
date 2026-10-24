@@ -1,0 +1,233 @@
+[
+  {
+    "id": "gj-engine",
+    "name": "Graph-JEPA \u00b7 training engine",
+    "communities": [
+      "1",
+      "17",
+      "22",
+      "39",
+      "57",
+      "66",
+      "82",
+      "88"
+    ]
+  },
+  {
+    "id": "gj-models",
+    "name": "Graph-JEPA \u00b7 model and layers",
+    "communities": [
+      "25",
+      "28",
+      "29",
+      "30",
+      "34",
+      "40",
+      "41",
+      "42",
+      "47",
+      "50",
+      "51",
+      "61",
+      "62",
+      "67"
+    ]
+  },
+  {
+    "id": "gj-data",
+    "name": "Graph-JEPA \u00b7 datasets, paper graph, positional encodings",
+    "communities": [
+      "2",
+      "6",
+      "9",
+      "68",
+      "102",
+      "118"
+    ]
+  },
+  {
+    "id": "gj-reason",
+    "name": "Graph-JEPA \u00b7 reasoning experiments (paper_reason*)",
+    "communities": [
+      "3",
+      "4",
+      "7",
+      "8",
+      "12",
+      "15",
+      "16",
+      "18",
+      "19",
+      "20",
+      "32",
+      "45",
+      "48",
+      "49",
+      "60",
+      "122",
+      "127"
+    ]
+  },
+  {
+    "id": "gj-bench",
+    "name": "Graph-JEPA \u00b7 benchmark entry points (train/*.py)",
+    "communities": [
+      "0",
+      "58",
+      "69",
+      "111"
+    ]
+  },
+  {
+    "id": "gj-diag",
+    "name": "Graph-JEPA \u00b7 rebuttal diagnostics (diag/)",
+    "communities": [
+      "5",
+      "10",
+      "11",
+      "13",
+      "21",
+      "33",
+      "36",
+      "53",
+      "56"
+    ]
+  },
+  {
+    "id": "pa-data",
+    "name": "Paper A \u00b7 data and knowledge-unit graph",
+    "communities": [
+      "37",
+      "52",
+      "55",
+      "72",
+      "75",
+      "93",
+      "94",
+      "104",
+      "110",
+      "131"
+    ]
+  },
+  {
+    "id": "pa-model",
+    "name": "Paper A \u00b7 model, losses, training",
+    "communities": [
+      "26",
+      "27",
+      "71",
+      "73",
+      "85",
+      "98",
+      "100",
+      "120",
+      "121",
+      "135",
+      "137",
+      "141",
+      "143"
+    ]
+  },
+  {
+    "id": "pa-eval",
+    "name": "Paper A \u00b7 evaluation and baselines",
+    "communities": [
+      "35",
+      "46",
+      "63",
+      "76",
+      "78",
+      "79",
+      "84",
+      "87"
+    ]
+  },
+  {
+    "id": "pa-report",
+    "name": "Paper A \u00b7 reporting, dashboard, infra monitoring",
+    "communities": [
+      "14",
+      "74",
+      "77",
+      "89",
+      "90",
+      "95",
+      "97",
+      "99",
+      "103",
+      "108",
+      "133",
+      "140"
+    ]
+  },
+  {
+    "id": "tests",
+    "name": "Tests",
+    "communities": [
+      "24",
+      "80",
+      "81",
+      "86",
+      "91",
+      "92",
+      "114",
+      "115"
+    ]
+  },
+  {
+    "id": "ops",
+    "name": "Cluster, SLURM and run scripts",
+    "communities": [
+      "23",
+      "31",
+      "43",
+      "44",
+      "54",
+      "59",
+      "106",
+      "112",
+      "117",
+      "124",
+      "130",
+      "132",
+      "139"
+    ]
+  },
+  {
+    "id": "docs",
+    "name": "Documentation",
+    "communities": [
+      "38",
+      "83",
+      "96",
+      "101",
+      "105",
+      "107",
+      "109",
+      "113",
+      "116",
+      "119",
+      "123",
+      "125",
+      "126",
+      "128",
+      "129",
+      "136",
+      "138",
+      "142",
+      "146"
+    ]
+  },
+  {
+    "id": "tooling",
+    "name": "Repository tooling (uv, graphify, editors)",
+    "communities": [
+      "64",
+      "65",
+      "70",
+      "134",
+      "144",
+      "145"
+    ]
+  }
+]

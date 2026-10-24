@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Paper A Dashboard</title>
+<script src="vendor/chart.umd.min.js"></script>
+<script>if(!window.Chart){document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"><\/script>')}</script>
+<script src="vendor/vis-network.min.js"></script>
+<script>if(!window.vis){document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/standalone/umd/vis-network.min.js"><\/script>')}</script>
+<style>
+:root{--bg:#f6f6f3;--panel:#fff;--text:#18181b;--muted:#6b6b70;--line:#e2e2de;--accent:#2563eb;--good:#16a34a;--bad:#dc2626;--warn:#d97706;--chance:#9ca3af;--soft:#f1f1ee}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111113;--panel:#1b1b1f;--text:#ececef;--muted:#a1a1aa;--line:#2e2e33;--accent:#60a5fa;--chance:#71717a;--soft:#232328}}
+:root[data-theme="dark"]{--bg:#111113;--panel:#1b1b1f;--text:#ececef;--muted:#a1a1aa;--line:#2e2e33;--accent:#60a5fa;--chance:#71717a;--soft:#232328}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 -apple-system,system-ui,sans-serif;background:var(--bg);color:var(--text)}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+h1{font-size:17px;margin:0;margin-right:auto;white-space:nowrap}select,button,input{font:inherit;padding:5px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--text)}
+label{display:inline-flex;gap:4px;align-items:center;max-width:100%}select{max-width:100%;min-width:0}
+.badge{padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;color:#fff;background:var(--muted)}.badge.running{background:var(--accent)}.badge.done{background:var(--good)}.badge.failed{background:var(--bad)}
+.progress{width:160px;height:8px;background:var(--line);border-radius:4px;overflow:hidden}.progress>div{height:100%;background:var(--accent);width:0}
+nav{display:flex;gap:4px;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
+nav button{border:none;background:none;padding:7px 12px;border-radius:6px;white-space:nowrap}nav button.on{background:var(--accent);color:#fff}
+main{padding:16px;max-width:1500px;margin:0 auto}.tab{display:none}.tab.on{display:block}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(440px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px}.grid .card{margin-bottom:0}
+.card h3{margin:0 0 2px;font-size:14px}.card p.hint{margin:0 0 8px;color:var(--muted);font-size:12px}
+.chart{position:relative;height:250px}
+.kpis{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));margin-bottom:14px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}.kpi .v{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}.kpi .l{font-size:12px;color:var(--muted)}.kpi .s{font-size:12px;color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel)}
+th.sort{cursor:pointer}td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.scroll{max-height:560px;overflow:auto}
+.ok{color:var(--good);font-weight:600}.no{color:var(--bad);font-weight:600}.wa{color:var(--warn);font-weight:600}.muted{color:var(--muted)}
+.heat td{text-align:center;font-size:11px;padding:4px}.heat th{font-size:11px;writing-mode:vertical-rl;transform:rotate(180deg);height:110px;padding:2px}
+iframe{width:100%;height:78vh;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.empty{color:var(--muted);padding:30px;text-align:center}
+.find{display:flex;gap:10px;padding:10px 12px;border-radius:8px;background:var(--soft);margin-bottom:8px;border-left:4px solid var(--muted)}
+.find.good{border-color:var(--good)}.find.bad{border-color:var(--bad)}.find.warn{border-color:var(--warn)}.find.info{border-color:var(--accent)}
+.find .i{font-size:18px;line-height:1.2}.find b{display:block;margin-bottom:2px}
+.pill{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;color:#fff}
+.c-dead{background:#6b7280}.c-identity{background:#dc2626}.c-type{background:#2563eb}.c-field{background:#9333ea}.c-leak{background:#d97706}.c-content{background:#16a34a}
+dl{display:grid;grid-template-columns:220px 1fr;gap:6px 14px;margin:0}dt{font-weight:600}dd{margin:0;color:var(--muted)}
+@media (max-width:620px){#wm-grid{grid-template-columns:1fr!important}#wm-net{height:420px!important}.grid{grid-template-columns:1fr}.progress{width:90px}dl{grid-template-columns:1fr}}
+</style></head><body>
+<header>
+ <h1>Paper A — training dashboard</h1>
+ <select id="run" title="run"></select>
+ <label class="muted" title="switch automatically to the newest run (the one training now)"><input type="checkbox" id="follow" checked> follow latest</label>
+ <span id="badge" class="badge">–</span>
+ <div class="progress"><div id="prog"></div></div><span id="stepinfo" class="muted"></span>
+ <label class="muted">x-axis <select id="xaxis"><option value="epoch">epoch</option><option value="step">step</option></select></label>
+ <label class="muted"><input type="checkbox" id="live" checked> live</label>
+ <button id="theme" title="light / dark" style="padding:5px 8px">◐</button>
+</header>
+<nav id="tabs"></nav>
+<main>
+ <section class="tab" id="t-overview">
+  <div class="kpis" id="kpis"></div>
+  <div class="card" id="headline"></div>
+  <div class="grid">
+   <div class="card"><h3>Knowledge units in the graph</h3><p class="hint">per KU type (the token vocabulary)</p><div class="chart"><canvas id="c-kus"></canvas></div></div>
+   <div class="card"><h3>Run configuration</h3><div class="scroll" style="max-height:250px"><table id="cfg"></table></div></div>
+  </div>
+ </section>
+ <section class="tab" id="t-explain">
+  <div class="card"><h3>Reading this run</h3><p class="hint">Automatic, plain-language interpretation of the selected run, recomputed whenever new data arrives. Green = healthy, amber = watch, red = problem, blue = context.</p><div id="findings"></div></div>
+  <div class="card"><h3>What every number means</h3><dl id="glossary"></dl></div>
+ </section>
+ <section class="tab" id="t-train"><div class="grid" id="g-train"></div></section>
+ <section class="tab" id="t-val"><div class="grid" id="g-val"></div></section>
+ <section class="tab" id="t-epochs">
+  <div class="card"><h3>Epoch by epoch</h3><p class="hint" id="ep-meta"></p><div id="ep-story"></div></div>
+  <div class="card"><h3>Results at the end of every epoch (validation)</h3><p class="hint">One row per epoch. ×chance ≥ 1.5 = learned. Δ = change vs the previous epoch. ★ = best epoch. Neurons = encoder output layer.</p><div class="scroll"><table id="ep-table"></table></div></div>
+  <div class="card"><h3>Every masked KU type at every epoch</h3><p class="hint">balanced MRR ÷ chance per type (rows) and epoch (columns): green = learned, amber = weak, red = at chance. Shows when each type starts (or stops) being learned.</p><div class="scroll"><table id="ep-types"></table></div></div>
+  <div class="grid" id="g-epochs"></div>
+ </section>
+ <section class="tab" id="t-tasks">
+  <div class="card"><h3>Reasoning-task evaluation matrix</h3><p class="hint" id="tk-meta"></p><div class="scroll"><table id="tk-table"></table></div>
+   <p class="hint" style="margin-top:8px">Slots → KU types (the data has no separate Problem / Material / Condition fields): <b>Problem</b> = context + question · <b>Method</b> = method · <b>Material / Condition</b> = procedure · <b>Result</b> = result · <b>Claim / Hypothesis</b> = claim (+ question). "given" = only these KU types stay visible in the target's own paper; neighbouring papers are unchanged. Retrieval tasks: balanced MRR of the true KU among ~100 same-type KUs of related papers (×chance ≥ 1.5 = solved). Consistency: balanced accuracy of supports vs contradicts on hidden claim–evidence edges (chance 0.5). Intervention: relative shift = how much the predicted result moves when the condition / method is swapped for another paper's, compared with the gap between two unrelated queries (0 = ignores it); "toward donor" = share of swaps that move the prediction toward the donor paper's actual result (chance 50%).</p></div>
+  <div class="card"><h3>Every task at every epoch (validation)</h3><p class="hint">Same scores at the end of each epoch: when does each kind of reasoning appear?</p><div class="scroll"><table id="tk-epochs"></table></div></div>
+  <div class="grid" id="g-tasks"></div>
+ </section>
+ <section class="tab" id="t-world">
+  <div class="card"><h3>The model as a JEPA world model</h3><p class="hint">Does the model use the graph's structure, and can it predict how an action on the graph changes a hidden KU? Updated every epoch (validation) and at the end (test).</p>
+   <div class="kpis" id="wm-kpis" style="margin:8px 0 6px"></div><div id="wm-verdict"></div></div>
+  <div class="card"><div class="row"><b>One subgraph through the model's eyes</b><span id="wm-pick"></span>
+    <label class="muted">node size <select id="wm-att"><option value="att">predictor attention</option><option value="enc_att">encoder attention (last layer)</option></select></label></div>
+   <p class="hint">The hidden KU is the node with the red ring and "?". Node size = how much attention the model paid to it while predicting. Edge width = how much the prediction changes when that edge is removed. Dashed red lines = the hidden KU's true links, which the model is not shown; faded nodes = KUs hidden with it (they would give the answer away). Grey lines = "belongs to this paper".</p>
+   <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,340px);gap:14px" id="wm-grid">
+    <div id="wm-net" style="height:560px;border:1px solid var(--line);border-radius:8px;background:var(--bg)"></div>
+    <div id="wm-side" style="font-size:13px;min-width:0;overflow-wrap:anywhere"></div>
+   </div></div>
+  <div class="grid" id="g-world"></div>
+ </section>
+ <section class="tab" id="t-neurons">
+  <div class="card"><h3>What the neurons encode</h3><p class="hint" id="n-meta"></p><div id="n-verdicts"></div>
+   <div class="row" style="margin-top:8px"><span class="pill c-dead">dead</span><span class="pill c-identity">paper identity</span><span class="pill c-type">KU type</span><span class="pill c-field">field</span><span class="pill c-leak">leak</span><span class="pill c-content">content</span>
+   <span class="muted">Each neuron gets one label: dead (never changes) · paper identity (≥50% of its variance tells papers apart: the shortcut) · KU type (≥50% tells types apart) · field (≥30%) · leak (moves with paraphrase leaks at the masked token) · content (none of these: a distributed content / relational feature)</span></div></div>
+  <div class="grid" id="g-neurons"></div>
+  <div class="card" style="margin-top:14px"><div class="row"><b>Every encoder neuron</b><select id="n-layer"></select><select id="n-cat"><option value="">all labels</option></select><input id="n-q" placeholder="search label / type / field"><span class="muted" id="n-n"></span></div>
+   <p class="hint">ω² = share of the neuron's variance explained by type / paper / field, bias-corrected so chance ≈ 0. r leak = correlation with the paraphrase-leak flag at the masked token, within type. Click a column to sort.</p>
+   <div class="scroll"><table id="n-table"></table></div></div>
+  <div class="card"><div class="row"><b>Predictor outputs</b><select id="p-filter"><option value="">all</option><option value="learned">learned</option><option value="not learned">not learned</option><option value="type">type only</option><option value="dead">dead</option><option value="leak">leak</option></select><span class="muted" id="p-n"></span></div>
+   <p class="hint">Each output dimension of the predictor: does it follow the true target's content (correlation within KU type)?</p>
+   <div class="scroll"><table id="p-table"></table></div></div>
+ </section>
+ <section class="tab" id="t-where"><div class="grid" id="g-where"></div></section>
+ <section class="tab" id="t-examples">
+  <div class="card"><div class="row"><b>Test queries</b><select id="ex-type"></select><select id="ex-sort"><option value="worst">worst first</option><option value="best">best first</option><option value="leak">highest context similarity</option></select><input id="ex-q" placeholder="search text / field"><span class="muted" id="ex-n"></span></div>
+  <p class="hint">rank = position of the true masked KU among the balanced pool (1 = found). <b>target</b> = what was masked; <b>top-1</b> = what the model ranked first in the full bank; ★ = top-1 comes from the SAME paper (identity shortcut).</p>
+  <div class="scroll"><table id="ex"></table></div></div>
+ </section>
+ <section class="tab" id="t-graphs"><div class="row"><select id="gsel"></select><a id="gopen" target="_blank">open in new tab ↗</a></div><iframe id="gframe"></iframe></section>
+ <section class="tab" id="t-bench">
+  <div class="card"><div class="row"><b>Benchmark</b><select id="bench-exp"></select><select id="bench-fam" title="show one family of systems"><option value="">all systems</option><option value="comparison">comparison systems</option><option value="gnn">JEPA + GNN encoder</option><option value="jepa">JEPA + graph transformer</option></select><span class="muted" id="bench-meta"></span></div>
+   <p class="hint">Every run of one experiment, one row per arm (mean over seeds, ± std). Run <code>EXPERIMENTS = ["BENCH"]</code> for the full benchmark (14 systems: five comparison systems, JEPA with three GNN encoders + Graph-JEPA, five JEPA graph-transformer variants) or <code>["ALL"]</code> for every distinct method of every experiment (66), on the same papers, candidates and evaluation. Pick a family with the second menu. Green = best in its column. Numbers are from the test split of finished runs.</p>
+   <div id="bench-rhead"></div></div>
+  <div class="card"><h3>Main findings · pre-registered hypotheses</h3><p class="hint">Fixed before the large-scale runs (findings.py). SUPPORTED = the 95% bootstrap interval of the difference is above 0 (2,000 resamples of the test queries), CONTRADICTED = below 0, INCONCLUSIVE = contains 0. Written when an experiment finishes.</p><div id="bench-findings" class="muted">Appears when the experiment has finished.</div></div>
+  <div class="card"><h3>Leaderboard 1 · Reasoning benchmark (main)</h3><p class="hint">The five reasoning tasks on the test split (same queries for every row). Candidates are on-topic: wrong answers come from the papers with the most similar problem, plus counterfactual edits of the true result / claim / method / procedure (direction reversed, negated, number changed, and for experiment design key terms or a sentence substituted from a topic-matched paper). "Beats its counterfactuals" = how often the true answer outranks each edit (chance 50%). Retrieval tasks: MRR ÷ chance (≥ 1.5× = solved). Consistency: balanced accuracy of supports vs contradicts (chance 50%, solved ≥ 65%). Intervention: when the condition (procedure) is swapped for another paper's, does the prediction move toward that paper's actual result (chance 50%), and how much does it move (relative shift; solved: ≥ 0.3 and ≥ 60% toward). <b>Reasoning index</b> = mean of the five scores on one × chance scale (consistency and intervention ÷ 0.5), <b>macro-averaged over canonical research domains</b> (each domain weighs the same, so Physics and Computer Science cannot dominate); the micro index over all queries and the worst domain are shown next to it. Ranked by the macro index.</p>
+   <div style="overflow-x:auto"><table id="bench-reason"></table></div></div>
+  <div class="card"><h3>Methods · how each one works</h3><p class="hint">Every method of the selected experiment, best reasoning index first: its family (comparison system, JEPA with a GNN encoder, JEPA with the graph transformer), the experiment it comes from, and what it changes relative to the reference JEPA model. Use it to read the leaderboards: which change helps which task.</p><div style="overflow-x:auto"><table id="bench-methods"></table></div></div>
+  <div class="card"><h3>Leaderboard 2 · Retrieval and model health (supporting)</h3><div id="bench-head"></div><p class="hint">Masked-KU retrieval on the test split, learning per KU type, how much accuracy comes from graph structure, the world-model action scores, and cost. Ranked by test MRR ÷ chance.</p><div style="overflow-x:auto"><table id="bench-table"></table></div></div>
+  <div class="card"><h3>Every masked KU type (test, × chance)</h3><div style="overflow-x:auto"><table id="bench-types"></table></div></div>
+  <div class="grid" id="g-bench"></div>
+ </section>
+ <section class="tab" id="t-compare">
+  <div class="card"><div class="row"><b>Compare two runs</b>
+   <label>A <select id="cmpA"></select></label><button id="cmpSwap" title="swap A and B">⇄</button><label>B <select id="cmpB"></select></label>
+   <select id="cmpSrc"><option value="best">test if both finished, else latest epoch</option><option value="val">latest epoch (validation)</option></select></div>
+   <p class="hint">Defaults to the two arms of the newest comparison experiment (E17: <b>section</b> = the paper as separate KUs vs <b>paper_masked</b> = the visible part of the paper as ONE text). Same papers, same hidden KUs, same candidates: only the way the model sees the paper differs.</p>
+   <div id="cmp-head"></div></div>
+  <div class="card"><h3>Side by side</h3><p class="hint">Green = the better of the two (by a clear margin), grey = about the same. ×chance: 1 = guessing, ≥ 1.5 = learned.</p><div style="overflow-x:auto"><table id="cmp-table"></table></div></div>
+  <div class="grid" id="g-cmp"></div>
+ </section>
+ <section class="tab" id="t-infra"><iframe src="infra.html" title="training infrastructure, live" style="width:100%;height:calc(100vh - 120px);border:0;background:transparent"></iframe></section>
+ <section class="tab" id="t-runs">
+  <div class="card"><h3>All runs (live)</h3><p class="hint">Every model trained so far, refreshed every few seconds. Click a run name to open it.</p><div class="scroll"><table id="runs-table"></table></div></div>
+  <div class="card"><div class="row"><b>Reasoning tasks: every run</b><select id="tm-src"><option value="best">test if finished, else latest epoch</option><option value="val">latest epoch (validation)</option></select></div>
+   <p class="hint">One row per run, one column per reasoning task (see the Reasoning tasks tab). Retrieval tasks: ×chance; consistency: balanced accuracy; intervention: relative shift of the predicted result when the condition is swapped.</p>
+   <div class="scroll"><table id="tm-table"></table></div></div>
+  <div class="card"><div class="row"><b>Epoch by epoch: every run</b><select id="em-metric"><option value="ratio">val MRR ÷ chance</option><option value="mrr">val balanced MRR</option><option value="learned">types learned</option><option value="loss">train JEPA loss</option><option value="identity">identity neurons</option><option value="probe">paper-identity probe</option></select></div>
+   <p class="hint">One row per run (every variation: mixed, each type alone, …), one column per epoch, from the end-of-epoch validation. ★ = that run's best epoch. Empty = epoch not reached yet.</p>
+   <div class="scroll"><table id="em-table"></table></div></div>
+  <div class="card"><div class="row"><b>Per masked KU type: every run side by side</b><select id="pt-src"><option value="val">latest validation (live)</option><option value="test">test (finished runs)</option></select><select id="pt-val"><option value="ratio">MRR ÷ chance</option><option value="mrr">balanced MRR</option></select></div>
+   <p class="hint">One row per run, one column per masked KU type. Compare the <b>mixed</b> run (all types together) with the <b>only=&lt;type&gt;</b> runs (each type alone, experiment E15). Green = above chance (learned), red = at chance; × chance ≥ 1.5 counts as learned. Empty = the run never masks that type.</p>
+   <div class="scroll"><table id="pt-table"></table></div></div>
+  <div class="card"><div class="row"><b>Compare runs</b><select id="cmp-metric"></select><span class="muted">x-axis follows the header setting</span></div><div class="chart" style="height:340px"><canvas id="c-cmp"></canvas></div></div>
+ </section>
+</main>
+<script>
+const TABS=[["overview","Overview"],["explain","Explain"],["train","Training dynamics"],["val","Validation (live)"],["epochs","Epochs"],["tasks","Reasoning tasks"],["world","World model"],["neurons","Neurons"],["where","Where it learns"],["examples","Examples"],["graphs","Graphs"],["bench","Benchmark"],["compare","Compare"],["runs","All runs"],["infra","Infrastructure (live)"]];
+const $=id=>document.getElementById(id);
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const PAL=["#2563eb","#dc2626","#16a34a","#d97706","#9333ea","#0891b2","#db2777","#65a30d","#ea580c","#4f46e5","#0d9488","#a16207"];
+const TYPE_COL={context:"#8c6bb1",question:"#6a51a3",method:"#2171b5",procedure:"#6baed6",result:"#238b45",interpretation:"#74c476",limitation:"#d94801",claim:"#e7298a",evidence:"#fdae6b",implication:"#c994c7",paper:"#525252"};
+const CAT_COL={dead:"#6b7280",identity:"#dc2626",type:"#2563eb",field:"#9333ea",leak:"#d97706",content:"#16a34a"};
+const CATS=["dead","identity","type","field","leak","content"];
+let RUN=null,DATA=null,RUNS=[],ALL={},charts={},tab="overview",lastRunsFetch=0;
+$("tabs").innerHTML=TABS.map(([k,l])=>`<button data-t="${k}">${l}</button>`).join("");
+$("tabs").onclick=e=>{if(e.target.dataset.t){tab=e.target.dataset.t;showTab();}};
+function showTab(){document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.t===tab));document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="t-"+tab));if(tab==="runs")runsTab(true);if(tab==="compare")compareTab(true);if(tab==="bench")benchTab(true);if(DATA)render();}
+function resetCharts(){Object.values(charts).forEach(c=>c.destroy());charts={};["g-train","g-val","g-where","g-neurons","g-epochs","g-tasks","g-cmp","g-world","g-bench"].forEach(g=>$(g).innerHTML="");}
+$("theme").onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==="dark"?"light":(r.dataset.theme==="light"?"dark":(matchMedia("(prefers-color-scheme:dark)").matches?"light":"dark"));resetCharts();render();if(tab==="runs")runsTab(true);};
+$("xaxis").onchange=()=>{resetCharts();render();if(tab==="runs")runsTab(true);};
+const tick=v=>v===0?"0":(Math.abs(v)<1e-3||Math.abs(v)>=1e5)?(+v).toExponential(1):+(+v).toPrecision(3);
+const fmt=(v,d=3)=>v==null||isNaN(v)?"–":(+v).toFixed(d);
+const pct=v=>v==null||isNaN(v)?"–":(100*v).toFixed(0)+"%";
+const esc=s=>String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+async function j(url){const r=await fetch(url+(url.includes("?")?"&":"?")+"t="+Date.now());if(!r.ok)throw new Error(url);return r.json();}
+const X=()=>$("xaxis").value;
+const xv=r=>X()==="epoch"&&r.epoch!=null?r.epoch:r.step;
+const ncount=L=>Object.values(L.counts).reduce((a,b)=>a+b,0);
+
+// ---------------------------------------------------------------- chart helpers
+function card(grid,id,title,hint,h){if($("w-"+id))return;const d=document.createElement("div");d.className="card";d.id="w-"+id;d.innerHTML=`<h3>${title}</h3><p class="hint">${hint||""}</p><div class="chart" style="${h?"height:"+h+"px":""}"><canvas id="c-${id}"></canvas></div>`;$(grid).appendChild(d);}
+function line(id,datasets,{logy=false,ymin,ymax}={}){
+  if(!$("c-"+id))return;const grid=css("--line"),txt=css("--muted");
+  const cfg={type:"line",data:{datasets},options:{animation:false,responsive:true,maintainAspectRatio:false,parsing:false,
+    interaction:{mode:"nearest",intersect:false},plugins:{legend:{labels:{color:txt,boxWidth:12,font:{size:11},filter:l=>!String(l.text).startsWith("·")}},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmt(c.parsed.y,4)}`}}},
+    scales:{x:{type:"linear",title:{display:true,text:X(),color:txt},ticks:{color:txt},grid:{color:grid}},y:{type:logy?"logarithmic":"linear",min:ymin,max:ymax,ticks:{color:txt,callback:tick},grid:{color:grid}}}}};
+  if(charts[id]){charts[id].data.datasets=datasets;charts[id].options.scales.x.title.text=X();charts[id].update("none");}else{charts[id]=new Chart($("c-"+id),cfg);}
+}
+function bar(id,labels,datasets,{horizontal=false,stacked=false,ymax}={}){
+  if(!$("c-"+id))return;const grid=css("--line"),txt=css("--muted");
+  const cfg={type:"bar",data:{labels,datasets},options:{animation:false,responsive:true,maintainAspectRatio:false,indexAxis:horizontal?"y":"x",
+    plugins:{legend:{labels:{color:txt,boxWidth:12,font:{size:11}}}},scales:{x:{stacked,ticks:{color:txt,font:{size:10}},grid:{color:grid}},y:{stacked,max:ymax,ticks:{color:txt,font:{size:10}},grid:{color:grid}}}}};
+  if(charts[id]){charts[id].data.labels=labels;charts[id].data.datasets=datasets;charts[id].update("none");}else{charts[id]=new Chart($("c-"+id),cfg);}
+}
+const ser=(rows,key,label,color,extra={})=>({label,data:rows.filter(r=>r[key]!=null&&isFinite(r[key])).map(r=>({x:xv(r),y:r[key]})),borderColor:color,backgroundColor:color,pointRadius:2,borderWidth:2,...extra});
+const chanceSer=(rows,key,label="chance")=>ser(rows,key,label,css("--chance"),{borderDash:[6,4],pointRadius:0,borderWidth:1.5});
+function vlines(ymin,ymax){   // epoch boundaries + sequential phase ends ("·" = hidden from the legend)
+  const D=DATA,out=[];if(!D)return out;
+  const spe=D.steps_per_epoch,E=D.epochs_total||0;
+  for(let e=1;e<E&&e<=50;e++){const x=X()==="epoch"?e:e*spe;out.push({label:"· epoch "+e,data:[{x,y:ymin},{x,y:ymax}],borderColor:css("--muted"),borderWidth:1,borderDash:[1,3],pointRadius:0});}
+  for(const p of ((D.schedule||{}).phases||[]).slice(0,-1)){const x=X()==="epoch"&&spe?p.end_step/spe:p.end_step;out.push({label:"· end of "+p.type,data:[{x,y:ymin},{x,y:ymax}],borderColor:TYPE_COL[p.type]||"#999",borderWidth:1,borderDash:[3,3],pointRadius:0});}
+  return out;
+}
+const maxOf=(rows,keys)=>Math.max(1e-6,...rows.flatMap(r=>keys.map(k=>+r[k]||0)));
+
+// ---------------------------------------------------------------- render
+function render(){
+  const D=DATA;if(!D)return;const H=D.history||[],E=D.evals||[],F=D.final||{};
+  const st=D.status||"";$("badge").textContent=st.split(":")[0];$("badge").className="badge "+(st.startsWith("fail")?"failed":st);
+  const h=H[H.length-1]||{},s=H.length?h.step+1:0;$("prog").style.width=(100*s/(D.steps_total||1))+"%";
+  $("stepinfo").textContent=`step ${s}/${D.steps_total}`+(D.epochs_total?` · epoch ${fmt(h.epoch||0,2)}/${fmt(D.epochs_total,2)}`:"")+(h.phase&&h.phase!=="mixed"?` · masking: ${h.phase}`:"")+` · ${D.updated||""}`;
+  ({overview,explain:explainTab,train:training,val:validation,epochs:epochsTab,tasks:tasksTab,world:worldTab,neurons:neuronsTab,where,examples,graphs}[tab]||(()=>{}))(D,H,E,F);
+}
+function kpi(l,v,s,cls=""){return `<div class="kpi"><div class="l">${l}</div><div class="v ${cls}">${v}</div><div class="s">${s||""}</div></div>`;}
+function overview(D,H,E,F){
+  const PM=D.config.ku_mode==="paper";
+  const h=H[H.length-1]||{},e=E[E.length-1]||{},rb=F.retrieval_balanced||{},nl=(D.neuron_timeline||[]).slice(-1)[0];
+  const encOut=nl?nl.layers[nl.layers.length-1]:null;
+  $("kpis").innerHTML=[
+    kpi("epoch",fmt(h.epoch,2)+(D.epochs_total?" / "+fmt(D.epochs_total,2):""),`step ${h.step??"–"} / ${D.steps_total}`),
+    kpi("JEPA loss",fmt(h.jepa,4),`total ${fmt(h.total,4)}`),
+    kpi("cos(pred, target)",fmt(h.cos_pred_target),"1 = prediction equals target"),
+    kpi("val balanced MRR",fmt(e.bal_MRR),`chance ${fmt(e.bal_chance)}`,e.bal_MRR!=null?(e.bal_MRR>1.5*e.bal_chance?"ok":"no"):""),
+    kpi("test balanced MRR",fmt(rb.MRR),`chance ${fmt(rb.chance_MRR)} · Hits@10 ${fmt(rb["Hits@10"])}`,rb.MRR!=null?(rb.MRR>1.5*rb.chance_MRR?"ok":"no"):""),
+    PM?kpi("KU mode","1 KU per paper","chi, identity probe and identity neurons: n/a"):kpi("chi (type-centred)",fmt(e.chi),"collapsed ≈0.01 · healthy ≈0.12"),
+    PM?kpi("standard MRR (val)",fmt(e.std_MRR),`chance ${fmt(e.std_chance)}`):kpi("paper-identity probe",fmt(e.probe_acc),`chance ${fmt(e.probe_chance)}`,e.probe_acc!=null&&e.probe_acc>3*(e.probe_chance||0)?"wa":""),
+    PM?kpi("content neurons",encOut?pct(encOut.counts.content/ncount(encOut)):"–","encoder output"):kpi("identity neurons",encOut?pct(encOut.counts.identity/ncount(encOut)):"–","encoder output (shortcut neurons)",encOut&&encOut.counts.identity>0?"wa":""),
+    kpi("predictor dims learned",nl?`${nl.pred_learned}/${nl.pred_n}`:"–",nl?`mean r ${fmt(nl.pred_mean_r,2)} (within type)`:"",nl?(nl.pred_learned>0.2*nl.pred_n?"ok":"no"):""),
+    kpi("paraphrase-leak flags",pct(h.flagged),`visible KU ≥${D.config.audit_tau??0.75} similar to target`),
+    kpi("masking",(D.schedule||{}).schedule||D.config.mask_schedule||"mixed",`now: ${h.phase||"–"} · ${((D.schedule||{}).types||[]).length} types`),
+    kpi("elapsed",fmt(h.sec,0)+" s",`${D.config.device} · ${fmt(h.tokens_per_instance,0)} tokens/instance`)].join("");
+  const f=findings(D).filter(x=>x.lvl!=="info").slice(0,3);
+  $("headline").innerHTML=`<h3>Key findings so far</h3>`+(f.length?f.map(fi=>`<div class="find ${fi.lvl}"><span class="i">${ICON[fi.lvl]}</span><div><b>${esc(fi.title)}</b>${fi.text}</div></div>`).join(""):'<div class="muted">Waiting for data…</div>')+`<p class="hint">Full reading in the <b>Explain</b> tab.</p>`;
+  const pt=D.index.per_type||{};bar("kus",Object.keys(pt),[{label:"KUs",data:Object.values(pt),backgroundColor:Object.keys(pt).map(k=>TYPE_COL[k]||"#999")}]);
+  $("cfg").innerHTML=Object.entries({...D.config,papers:D.index.papers,KUs:D.index.kus,"KUs/paper":D.index.kus_per_paper,splits:JSON.stringify(D.index.splits),citations:D.index.paper_edges_cites,"proxy edges":D.index.paper_edges_proxy,experiment:D.experiment||"",arm:D.arm||"",seed:D.seed??""}).map(([k,v])=>`<tr><td class="muted">${k}</td><td>${Array.isArray(v)?v.join(", "):esc(v)}</td></tr>`).join("");
+}
+
+// ---------------------------------------------------------------- interpretation
+const ICON={good:"✅",warn:"⚠️",bad:"⛔",info:"ℹ️"};
+function findings(D){
+  const H=D.history||[],E=D.evals||[],F=D.final||{},out=[];const add=(lvl,title,text)=>out.push({lvl,title,text});
+  const PM=D.config.ku_mode==="paper";
+  if(D.config.ku_mode==="paper_masked")add("info","Paper-as-text mode (paper_masked)","The target's own paper is shown to the model as ONE text made of the visible parts (encoded together by the text encoder); the hidden KU, the candidates it is ranked against and the neighbouring papers are the same as in section mode. During training the visible parts follow the reasoning templates (forward, inverse, abduction) and 'everything except the hidden part and what restates it'. Compare it with a section run in the Compare tab.");
+  if(PM)add("info","Paper mode: one KU per paper","Each paper is a single KU (all sections + claims). The model predicts a hidden paper only from its neighbouring papers (citations, same field / subfield, near-duplicate links). Within-paper measures (chi, paper-identity probe, identity neurons, same-paper top-1) do not apply and are hidden.");
+  const h=H[H.length-1],e=E[E.length-1],e0=E[0];
+  if(!h){add("info","No data yet","The run has started; the first numbers arrive after the first logged step.");return out;}
+  const done=(D.status||"").startsWith("done");
+  if(e){const r=e.bal_MRR/(e.bal_chance||1);
+    if(r>2)add("good","It is learning to recover masked KUs",`Validation balanced MRR is ${fmt(e.bal_MRR)}, ${r.toFixed(1)}× the chance level ${fmt(e.bal_chance)}: picking the true hidden KU out of ~100 same-type KUs from related papers works well above guessing.`);
+    else if(r>1.3)add("warn","Weak learning signal",`Validation balanced MRR ${fmt(e.bal_MRR)} is only ${r.toFixed(1)}× chance (${fmt(e.bal_chance)}). Some signal, but not much yet.`);
+    else add("bad","Not learning the masked content (at chance)",`Validation balanced MRR ${fmt(e.bal_MRR)} ≈ chance ${fmt(e.bal_chance)}. The model cannot yet tell the true hidden KU from similar KUs of related papers.`);
+    if(e0&&E.length>2){const d=e.bal_MRR-e0.bal_MRR;add(d>0.01?"good":d<-0.01?"bad":"info","Trend over training",`Balanced MRR moved from ${fmt(e0.bal_MRR)} (epoch ${fmt(e0.epoch,2)}) to ${fmt(e.bal_MRR)} (epoch ${fmt(e.epoch,2)}): ${d>0.01?"improving":d<-0.01?"getting worse":"flat"}.`);}
+  } else add("info","No validation yet","Validation runs every eval_every steps; the first point appears soon.");
+  if(h.cos_pred_target>0.95&&e&&e.bal_MRR<1.5*e.bal_chance)add("bad","The loss is satisfied by a shortcut",`Prediction and target agree almost perfectly (cos ${fmt(h.cos_pred_target)}), yet retrieval is at chance. The model predicts something that matches the target embedding without carrying what makes THIS KU different from others: the degenerate (A1) solution of the paper.`);
+  else if(h.cos_pred_target!=null)add("info","Prediction vs target",`cos(pred, target) = ${fmt(h.cos_pred_target)} on the training batch (1 = identical).`);
+  if(h.pred_pairwise_cos>0.8)add("bad","Predictions are collapsing",`Different queries get nearly the same prediction (pairwise cosine ${fmt(h.pred_pairwise_cos)}). A constant query cannot retrieve anything.`);
+  else if(h.pred_std!=null&&h.target_std&&h.pred_std<0.3*h.target_std)add("warn","Predictions are low-variance",`The spread of predictions (${fmt(h.pred_std)}) is much smaller than the spread of targets (${fmt(h.target_std)}): the predictor hedges toward the average.`);
+  else if(h.pred_std!=null)add("good","No prediction collapse",`Predictions vary across queries (std ${fmt(h.pred_std)} vs target std ${fmt(h.target_std)}, pairwise cos ${fmt(h.pred_pairwise_cos)}).`);
+  if(!PM&&e&&e.probe_acc!=null){const r=e.probe_acc/(e.probe_chance||1);
+    if(r>5)add("warn","Paper identity is easy to read off the encoder",`A linear probe identifies which paper a KU comes from with ${pct(e.probe_acc)} accuracy (chance ${pct(e.probe_chance)}). That is the information the identity shortcut uses.`+(e.between_var!=null?` Between-paper variance share ${pct(e.between_var)} (G1 target: below 30%).`:""));
+    else add("good","Paper identity is not dominant",`Probe accuracy ${pct(e.probe_acc)} vs chance ${pct(e.probe_chance)}.`);}
+  const nl=(D.neuron_timeline||[]).slice(-1)[0];
+  if(nl){const L=nl.layers[nl.layers.length-1],n=ncount(L),idp=L.counts.identity/n;
+    if(PM)add("info","Neurons (encoder output)",`${pct(L.counts.content/n)} content, ${pct(L.counts.type/n)} token-type (paper vs hub), ${pct(L.counts.field/n)} field, ${pct(L.counts.leak/n)} leak, ${pct(L.counts.dead/n)} dead neurons. Details per neuron in the Neurons tab.`);
+    else add(idp>0.1?"warn":"good","Neurons (encoder output)",`${pct(idp)} paper-identity, ${pct(L.counts.type/n)} KU-type, ${pct(L.counts.content/n)} content, ${pct(L.counts.dead/n)} dead neurons. ${idp>0.1?"A sizeable group of neurons exists mainly to tell papers apart.":"Few neurons are dedicated to paper identity."} Details per neuron in the Neurons tab.`);
+    add(nl.pred_learned>0.2*nl.pred_n?"good":"bad","Predictor outputs",`${nl.pred_learned} of ${nl.pred_n} output dimensions follow the true target's content within its type (mean r ${fmt(nl.pred_mean_r,2)}).`);}
+  if(h.flagged!=null)add(h.flagged>0.3?"warn":"good","Paraphrase leaks",h.flagged>0.05?`${pct(h.flagged)} of training instances still contain a visible KU at least ${D.config.audit_tau??0.75}-similar to the hidden target, so part of the task can be solved by copying text rather than reasoning.`:`Only ${pct(h.flagged)} of training instances contain a visible KU ≥${D.config.audit_tau??0.75}-similar to the hidden target: the masking hides the answer well.`);
+  if(F.by_ctx_sim){const b=Object.entries(F.by_ctx_sim).sort(),hi=b[b.length-1],lo=b[0];if(hi&&lo)add("info","Leak vs accuracy (test)",`MRR is ${fmt(hi[1].MRR_bal)} when the most similar visible KU is in ${hi[0]} and ${fmt(lo[1].MRR_bal)} in ${lo[0]}. A big gap means accuracy comes from copying.`);}
+  if(F.per_type){const good=[],bad=[];for(const[t,v]of Object.entries(F.per_type))(v.MRR_bal>1.5*v.chance_bal?good:bad).push(t);
+    if(good.length)add("good","KU types it learns (test)",good.join(", ")+".");
+    if(bad.length)add("bad","KU types it does not learn (test)",bad.join(", ")+" stay at chance.");
+    const same=PM?[]:Object.entries(F.per_type).filter(([t,v])=>v.top1_same_paper>0.3).map(([t])=>t);
+    if(same.length)add("warn","Identity shortcut in the answers",`For ${same.join(", ")}, the top-ranked KU often comes from the SAME paper as the target: the model finds the right paper, not the right KU.`);}
+  const P=(D.schedule||{}).phases;
+  if(P&&E.length>2){const forgot=[];for(const p of P.slice(0,-1)){const at=E.filter(r=>r.step<=p.end_step).slice(-1)[0];if(at&&at.per_type&&e.per_type&&at.per_type[p.type]!=null&&e.per_type[p.type]!=null&&at.per_type[p.type]-e.per_type[p.type]>0.02)forgot.push(`${p.type} (${fmt(at.per_type[p.type])} → ${fmt(e.per_type[p.type])})`);}
+    add(forgot.length?"bad":"good","Forgetting across masking phases",forgot.length?`Accuracy on earlier phases dropped after the model moved on: ${forgot.join(", ")}. Try replay_frac 0.25 or a mixed schedule.`:"No type lost accuracy after its phase ended.");}
+  if(D.relbias){const last=D.relbias[D.relbias.length-1],names=D.rel_names;const idx=last.map((v,i)=>[v,i]).sort((a,b)=>Math.abs(b[0])-Math.abs(a[0])).slice(0,4);
+    add("info","Graph relations the encoder relies on",`Strongest learned attention biases (last layer): ${idx.map(([v,i])=>`${names[i]} (${v>0?"+":""}${fmt(v,2)})`).join(", ")}. Positive = attends along that relation.`);}
+  if(!PM&&e&&e.inverse_acc!=null)add(e.inverse_acc>0.6?"good":"info","Relations kept in the representation",`The inverse-relation head recovers hidden relations with ${pct(e.inverse_acc)} accuracy (≈50% = no information).`);
+  const TT=(F.tasks&&!F.tasks.note)?F.tasks:((D.epoch_results||[]).slice(-1)[0]||{}).tasks;
+  if(!PM&&TT&&!TT.note){const solved=[],weak=[],not=[];
+    for(const k of TASK_KEYS){const sc=taskScore(TT,k);if(!sc||sc.v==null)continue;(sc.lvl==="good"?solved:sc.lvl==="warn"?weak:not).push(TASK_NAME[k]);}
+    add(solved.length?"good":"bad","Reasoning tasks"+(F.tasks?" (test)":" (latest epoch)"),`Solved: ${solved.join(", ")||"none"}. Weak: ${weak.join(", ")||"none"}. Not solved: ${not.join(", ")||"none"}. Details in the Reasoning tasks tab.`);}
+  const WM=wmLatest(D);
+  if(WM&&D.config.ku_mode!=="paper")add(WM.s.share>0.1?"good":"warn","Graph structure",WM.s.share>0.1?`Typed edges carry ${pct(WM.s.share)} of the above-chance accuracy.`:
+    `Removing every typed edge leaves accuracy at ${fmt(WM.s.without,2)}× (vs ${fmt(WM.s.with,2)}×): the model does not use the subgraph's links. See the World model tab.`);
+  const ER=D.epoch_results||[];
+  if(ER.length>=2){const bi=ER.reduce((b,r,i)=>r.bal_MRR>ER[b].bal_MRR?i:b,0),last=ER[ER.length-1],b=ER[bi];
+    if(bi===ER.length-1)add("good","Still improving at the latest epoch",`The best validation MRR so far is at epoch ${b.epoch} (${fmt(b.bal_MRR)}), the most recent one: more epochs may help.`);
+    else if(b.bal_MRR-last.bal_MRR>0.01)add("warn",`Peaked at epoch ${b.epoch}`,`Validation MRR was ${fmt(b.bal_MRR)} at epoch ${b.epoch} and is ${fmt(last.bal_MRR)} at epoch ${last.epoch}: later epochs made it worse (over-fitting or drift). Epoch ${b.epoch} is the one to report.`);
+    else add("info",`Plateau since epoch ${b.epoch}`,`Validation MRR has stayed near ${fmt(b.bal_MRR)} since epoch ${b.epoch}; extra epochs add little.`);}
+  if(!done)add("info","Run in progress","These readings update as training continues; per-type test results appear at the end.");
+  return out;
+}
+function explainTab(D){
+  $("findings").innerHTML=findings(D).map(f=>`<div class="find ${f.lvl}"><span class="i">${ICON[f.lvl]}</span><div><b>${esc(f.title)}</b>${f.text}</div></div>`).join("");
+  if(!$("glossary").innerHTML)$("glossary").innerHTML=Object.entries(GLOSS).map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join("");
+}
+const GLOSS={
+ "masked KU / target":"the one knowledge unit hidden in each training example; the model must predict its embedding from the visible ones",
+ "epoch":"one full pass in which every target KU of the training set has been masked once",
+ "JEPA loss":"mean squared error between the predicted embedding and the target encoder's embedding of the hidden KU",
+ "cos(pred, target)":"how closely the prediction points in the target's direction (1 = same). High cos with chance-level retrieval = shortcut",
+ "balanced MRR":"mean reciprocal rank of the true hidden KU among it plus ~100 same-type KUs from the same subfield / linked papers. 1 = always first",
+ "standard MRR":"same, ranked against every same-type KU of the split",
+ "chance":"the MRR a random ranking would get with the same pool sizes",
+ "chi":"share of variance WITHIN papers (after removing type centroids). H-JEPA scale: collapsed ≈ 0.01, healthy ≈ 0.12",
+ "between-paper variance share":"share of variance that tells papers apart (G1 wants it below 30%)",
+ "paper-identity probe":"accuracy of a linear classifier that guesses which paper a KU came from",
+ "effective rank":"how many directions the representation really uses (higher = richer)",
+ "pred std / pairwise cos":"how different the predictions are across queries; pairwise cos near 1 = all queries look alike (collapse)",
+ "inverse-relation accuracy":"how often a small head recovers the hidden relation (supported_by, grounds, …) between two KUs: evidence that relations survive in the representation",
+ "relation sensitivity":"how much the prediction changes when one relation is rewired to another paper",
+ "paraphrase-leak flag":"a visible KU is at least audit_tau cosine-similar to the hidden target (0.75 for MiniLM, 0.87 for gte-modernbert, whose cosines run higher): the answer is partly visible",
+ "Benchmark tab":"all runs of one experiment (default BENCH: six comparison systems and every JEPA variant), one row per arm, mean ± std over seeds, the best value per column in green, with the gain over the reference and whether each arm beats the text baseline",
+ "Compare tab":"two runs side by side (default: the two arms of E17): a plain-language headline, a table with the better run marked in green for every metric, and charts on the same scale",
+ "KU mode":"paper_masked = the target's own paper is shown as ONE text made of the visible parts (joined and encoded together) while the hidden KU, the candidates and the neighbouring papers stay as in section mode; section = each paper split into ~22 KUs (7 sections + claims, evidence, implications), the model predicts a hidden KU from the rest of its paper and neighbours; paper = the whole paper is ONE KU, the model predicts a hidden paper only from neighbouring papers",
+ "text encoder":"the frozen sentence encoder that turns each KU's text into its node features (gte-modernbert: 8192-token context, so no KU is cut off)",
+ "relation attention bias":"learned extra attention along each graph relation, per layer",
+ "ω² (omega squared)":"share of a neuron's variance explained by a grouping (type / paper / field), bias-corrected so pure chance ≈ 0",
+ "predictor dim learned":"an output dimension whose value tracks the true target's value across queries of the same type (r ≥ 0.5)",
+ "top-1 same paper (★)":"the model's first choice came from the target's own paper: it found the paper, not the KU",
+ "end-of-epoch validation":"after every full epoch the model is evaluated on the validation split with more queries than the live curves (epoch_eval_instances): the Epochs tab and the All-runs epoch matrix",
+ "reasoning tasks":"five ways of querying the same model: forward (result | problem, method, conditions), inverse design (method / material | problem, result), abduction (claim / hypothesis | results, conditions), consistency (supports vs contradicts edges), intervention (swap the condition / method and watch the predicted result)",
+ "world model / action":"an edit of the graph (swap a KU for another paper's, or flip a supports/contradicts edge). With E19 the model is trained to predict the hidden KU's latent AFTER the action; direction cos measures whether its predicted change points the same way as the true change",
+ "structure reliance":"balanced MRR with the normal graph vs with every typed edge removed; the gap is what the subgraph's links contribute",
+ "phase (sequential masking)":"the KU type currently being masked; coloured dotted vertical lines mark phase ends, grey dotted lines mark epochs",
+};
+
+// ---------------------------------------------------------------- training / validation
+function training(D,H){
+  const g="g-train";
+  card(g,"loss","Training losses","every loss term (log scale). The JEPA term should fall; probe/inverse terms show relational learning. Dotted lines: epoch / phase boundaries.");
+  card(g,"ltype","JEPA loss by masked KU type","which KU types the predictor learns to predict, and which it does not");
+  card(g,"cos","Prediction ↔ target agreement","cosine between predicted and EMA-target embedding (training batch)");
+  card(g,"collapse","Collapse monitor","spread of predictions vs targets across the batch; pairwise cos → 1 means every query looks the same");
+  card(g,"grad","Gradient norms by module","before clipping (log). A dead module shows ~0.");
+  card(g,"flag","Paraphrase-leak rate in training batches","fraction of instances the nuisance audit flags");
+  card(g,"lr","Learning rate","warm-up then constant");
+  card(g,"ema","EMA momentum of the target encoder","rises to 1: the target slowly freezes");
+  card(g,"rb","Learned relation attention bias (mean over heads)","per encoder layer: blue = attends along this relation, red = avoids it. Shows WHICH graph relations the encoder uses.");
+  const keys=Object.keys(H[0]||{}).filter(k=>["jepa","inverse","inverse_probe","reg","align","shacl","contrast","total"].includes(k));
+  line("loss",keys.map((k,i)=>ser(H,k,k,PAL[i])).concat(vlines(Math.max(1e-6,Math.min(...H.map(r=>r.jepa||1))),maxOf(H,["total"]))),{logy:true});
+  const types=[...new Set(H.flatMap(r=>Object.keys(r.loss_by_type||{})))];
+  line("ltype",types.map((t,i)=>({label:t,data:H.filter(r=>r.loss_by_type&&r.loss_by_type[t]!=null).map(r=>({x:xv(r),y:r.loss_by_type[t]})),borderColor:TYPE_COL[t]||PAL[i],backgroundColor:TYPE_COL[t]||PAL[i],pointRadius:1.5,borderWidth:2})),{logy:true});
+  line("cos",[ser(H,"cos_pred_target","cos(pred,target)",PAL[0])].concat(vlines(0,1)));
+  line("collapse",[ser(H,"pred_std","pred std",PAL[1]),ser(H,"target_std","target std",PAL[2]),ser(H,"pred_pairwise_cos","pred pairwise cos",PAL[3])].concat(vlines(0,1)));
+  const mods=[...new Set(H.flatMap(r=>Object.keys(r.grad_norm||{})))];
+  line("grad",mods.map((m,i)=>({label:m,data:H.filter(r=>r.grad_norm).map(r=>({x:xv(r),y:Math.max(r.grad_norm[m],1e-8)})),borderColor:PAL[i],backgroundColor:PAL[i],pointRadius:1.5,borderWidth:2})),{logy:true});
+  line("flag",[ser(H,"flagged","flagged fraction",PAL[3])].concat(vlines(0,1)),{ymin:0});
+  line("lr",[ser(H,"lr","learning rate",PAL[0])]);
+  line("ema",[ser(H,"ema","EMA momentum",PAL[4])]);
+  heat(D);
+}
+function heat(D){
+  const el=$("c-rb");if(!el)return;const M=D.relbias;const box=el.parentElement;
+  if(!M){box.innerHTML='<div class="empty">no data yet</div>';return;}
+  const names=D.rel_names,mx=Math.max(1e-6,...M.flat().map(Math.abs));
+  const col=v=>{const a=Math.min(1,Math.abs(v)/mx);return v>=0?`rgba(37,99,235,${a})`:`rgba(220,38,38,${a})`;};
+  box.style.height="auto";box.innerHTML=`<div class="scroll"><table class="heat"><tr><th></th>${names.map(n=>`<th>${n}</th>`).join("")}</tr>${M.map((r,l)=>`<tr><td><b>L${l+1}</b></td>${r.map(v=>`<td style="background:${col(v)}" title="${fmt(v,4)}">${fmt(v,3)}</td>`).join("")}</tr>`).join("")}</table></div>`;
+}
+function validation(D,H,E){
+  const g="g-val";
+  card(g,"vbal","Balanced retrieval (validation)","MRR of the true masked KU among ~100 same-type KUs from related papers. Above the dashed chance line = it learns.");
+  card(g,"vtype","Balanced MRR by KU type","per masked KU type (dashed = chance). Sequential masking: coloured dotted lines mark phase ends; a curve dropping after its phase = forgetting.");
+  card(g,"vstd","Standard retrieval (validation)","MRR against every same-type KU in the split");
+  card(g,"vchi","Collapse diagnostics","chi (within-paper variance share, type-centred) and between-paper variance share (G1: < 0.30)");
+  card(g,"vprobe","Paper-identity probe","how decodable paper identity is from context states (the A1 shortcut)");
+  card(g,"vrank","Effective rank","of target- and context-encoder KU states");
+  card(g,"vinv","Relational signal","inverse-relation accuracy on hidden edges; relation sensitivity of the prediction");
+  line("vbal",[ser(E,"bal_MRR","balanced MRR",PAL[0]),ser(E,"bal_H10","Hits@10",PAL[2]),ser(E,"acc_sim","acc (sim ≥ 0.80)",PAL[3]),chanceSer(E,"bal_chance")].concat(vlines(0,maxOf(E,["bal_H10","bal_MRR","acc_sim"]))),{ymin:0});
+  const types=[...new Set(E.flatMap(r=>Object.keys(r.per_type||{})))];
+  line("vtype",types.map(t=>({label:t,data:E.filter(r=>r.per_type&&r.per_type[t]!=null).map(r=>({x:xv(r),y:r.per_type[t]})),borderColor:TYPE_COL[t],backgroundColor:TYPE_COL[t],pointRadius:2,borderWidth:2})).concat([{label:"chance",data:E.filter(r=>r.per_type_chance).map(r=>({x:xv(r),y:Object.values(r.per_type_chance)[0]})),borderColor:css("--chance"),borderDash:[6,4],pointRadius:0}]).concat(vlines(0,Math.max(0.05,...E.flatMap(r=>Object.values(r.per_type||{})).filter(v=>v!=null)))),{ymin:0});
+  line("vstd",[ser(E,"std_MRR","standard MRR",PAL[0]),chanceSer(E,"std_chance")],{ymin:0});
+  line("vchi",[ser(E,"chi","chi",PAL[0]),ser(E,"between_var","between-paper var share",PAL[1]),{label:"G1 threshold 0.30",data:E.map(r=>({x:xv(r),y:0.3})),borderColor:css("--bad"),borderDash:[4,4],pointRadius:0}],{ymin:0});
+  line("vprobe",[ser(E,"probe_acc","probe accuracy",PAL[1]),chanceSer(E,"probe_chance")],{ymin:0});
+  line("vrank",[ser(E,"eff_rank","target eff. rank",PAL[0]),ser(E,"ctx_eff_rank","context eff. rank",PAL[4])]);
+  line("vinv",[ser(E,"inverse_acc","inverse-relation acc",PAL[2]),ser(E,"rel_sens","relation sensitivity",PAL[3])],{ymin:0});
+}
+
+// ---------------------------------------------------------------- epochs
+function epochsTab(D){
+  const R=D.epoch_results||[],E=D.epochs_total||0;
+  $("ep-meta").textContent=R.length?`${R.length} of ${Math.floor(E+1e-9)} epochs finished · each row = validation on ${D.config.epochs?"the val split":""} at the end of that epoch`:
+    (D.config.epochs>0?"The first row appears when epoch 1 finishes.":"This run uses STEPS, not EPOCHS: set EPOCHS ≥ 1 in the notebook to get end-of-epoch results.");
+  if(!R.length){["ep-story","ep-table","ep-types"].forEach(i=>$(i).innerHTML="");return;}
+  const ratio=r=>r.bal_MRR/(r.bal_chance||1),bi=R.reduce((b,r,i)=>r.bal_MRR>R[b].bal_MRR?i:b,0);
+  const learned=r=>Object.entries(r.per_type).filter(([t,v])=>v.MRR>=1.5*v.chance).map(([t])=>t);
+  $("ep-story").innerHTML=R.map((r,i)=>{const p=R[i-1],L=learned(r),PL=p?learned(p):[];
+    const nw=L.filter(t=>!PL.includes(t)),lost=PL.filter(t=>!L.includes(t)),d=p?r.bal_MRR-p.bal_MRR:null,rr=ratio(r);
+    const lvl=rr>=1.5?"good":rr>=1.15?"warn":"bad";
+    let t=`val balanced MRR ${fmt(r.bal_MRR)} = ${rr.toFixed(2)}× chance`+(d!=null?` (${d>=0?"+":""}${fmt(d)} vs epoch ${p.epoch})`:"")+`. `;
+    t+=`Learned types: ${L.length?L.join(", "):"none"} (${L.length}/${Object.keys(r.per_type).length}).`;
+    if(p&&nw.length)t+=` <strong>Newly learned:</strong> ${nw.join(", ")}.`;if(lost.length)t+=` <strong class="no">Lost:</strong> ${lost.join(", ")}.`;
+    t+=` Train JEPA loss ${fmt(r.train_jepa,4)}`+(p?` (${r.train_jepa<p.train_jepa?"↓":"↑"} ${pct(Math.abs(r.train_jepa-p.train_jepa)/(p.train_jepa||1))})`:"")+`.`;
+    if(r.neurons)t+=` Neurons: ${pct(r.neurons.identity)} paper-identity, ${pct(r.neurons.content)} content; predictor ${r.neurons.pred_learned}/${r.neurons.pred_n} dims learned.`;
+    if(r.flagged!=null)t+=` Leak-flagged queries ${pct(r.flagged)}.`;
+    return `<div class="find ${lvl}"><span class="i">${ICON[lvl]}</span><div><b>Epoch ${r.epoch}${i===bi?" ★ best so far":""}</b>${t}</div></div>`;}).join("");
+  const cols=[["epoch","epoch"],["sec","time (s)"],["train_jepa","train JEPA"],["bal_MRR","val bal. MRR"],["ratio","×chance"],["delta","Δ MRR"],["bal_H10","Hits@10"],["acc_sim","acc (sim≥0.8)"],["false_accept","false accept"],["std_MRR","std MRR"],["chi","chi"],["probe_acc","probe"],["inverse_acc","inverse acc"],["flagged","leak flagged"],["idn","id. neurons"],["cn","content neurons"],["pl","pred learned"],["tl","types learned"]];
+  $("ep-table").innerHTML=`<tr>${cols.map(([k,l])=>`<th class="num">${l}</th>`).join("")}</tr>`+R.map((r,i)=>{const p=R[i-1],rr=ratio(r),d=p?r.bal_MRR-p.bal_MRR:null;
+    const v={epoch:r.epoch+(i===bi?" ★":""),sec:fmt(r.sec,0),train_jepa:fmt(r.train_jepa,4),bal_MRR:fmt(r.bal_MRR),ratio:`<span style="padding:1px 5px;border-radius:4px;background:${ratioBg(rr)}">${rr.toFixed(2)}×</span>`,
+      delta:d==null?"–":`<span class="${d>0.005?"ok":d<-0.005?"no":""}">${d>=0?"+":""}${fmt(d)}</span>`,bal_H10:fmt(r.bal_H10),acc_sim:fmt(r.acc_sim),false_accept:fmt(r.false_accept),std_MRR:fmt(r.std_MRR),chi:fmt(r.chi),probe_acc:fmt(r.probe_acc,2),
+      inverse_acc:fmt(r.inverse_acc,2),flagged:pct(r.flagged),idn:r.neurons?pct(r.neurons.identity):"–",cn:r.neurons?pct(r.neurons.content):"–",pl:r.neurons?`${r.neurons.pred_learned}/${r.neurons.pred_n}`:"–",tl:`${r.types_learned}/${Object.keys(r.per_type).length}`};
+    return `<tr>${cols.map(([k])=>`<td class="num">${v[k]}</td>`).join("")}</tr>`;}).join("");
+  const types=[...new Set(R.flatMap(r=>Object.keys(r.per_type)))];
+  $("ep-types").innerHTML=`<tr><th>KU type</th>${R.map(r=>`<th class="num">epoch ${r.epoch}</th>`).join("")}</tr>`+types.map(t=>`<tr><td style="color:${TYPE_COL[t]};font-weight:600">${t}</td>${R.map(r=>{const v=r.per_type[t];if(!v)return '<td class="num muted">·</td>';const x=v.MRR/(v.chance||1);
+    return `<td class="num" style="background:${ratioBg(x)}" title="MRR ${fmt(v.MRR)} · chance ${fmt(v.chance)} · n=${v.n} · top-1 same paper ${pct(v.same_paper)}">${x.toFixed(2)}×</td>`;}).join("")}</tr>`).join("");
+  const g="g-epochs",ex=r=>({...r,step:r.step,epoch:r.epoch});
+  card(g,"eperf","Validation MRR at each epoch end","balanced MRR (blue) vs chance (dashed); Hits@10 (green)");
+  card(g,"eloss","Training JEPA loss per epoch","mean over all steps of that epoch");
+  card(g,"etype","Each KU type per epoch","balanced MRR ÷ chance; the dashed line at 1 = chance, 1.5 = 'learned'");
+  card(g,"eneur","Neurons per epoch (encoder output)","share of paper-identity, content and KU-type neurons; predictor dims learned (right scale: share of dims)");
+  const rows=R.map(ex),xs=r=>X()==="epoch"?r.epoch:r.step;
+  const S=(key,label,col,extra={})=>({label,data:rows.filter(r=>r[key]!=null).map(r=>({x:xs(r),y:r[key]})),borderColor:col,backgroundColor:col,pointRadius:4,borderWidth:2,...extra});
+  line("eperf",[S("bal_MRR","balanced MRR",PAL[0]),S("bal_H10","Hits@10",PAL[2]),S("acc_sim","acc (sim ≥ 0.80)",PAL[3]),S("bal_chance","chance",css("--chance"),{borderDash:[6,4],pointRadius:0})],{ymin:0});
+  line("eloss",[S("train_jepa","train JEPA (epoch mean)",PAL[1])],{logy:true});
+  line("etype",types.map(t=>({label:t,data:rows.filter(r=>r.per_type[t]).map(r=>({x:xs(r),y:r.per_type[t].MRR/(r.per_type[t].chance||1)})),borderColor:TYPE_COL[t],backgroundColor:TYPE_COL[t],pointRadius:3,borderWidth:2}))
+    .concat([{label:"chance (1×)",data:rows.map(r=>({x:xs(r),y:1})),borderColor:css("--chance"),borderDash:[6,4],pointRadius:0},{label:"learned (1.5×)",data:rows.map(r=>({x:xs(r),y:1.5})),borderColor:css("--good"),borderDash:[2,4],pointRadius:0}]),{ymin:0});
+  const N=rows.filter(r=>r.neurons);
+  line("eneur",[{label:"paper identity",data:N.map(r=>({x:xs(r),y:r.neurons.identity})),borderColor:CAT_COL.identity,backgroundColor:CAT_COL.identity,pointRadius:3},
+    {label:"content",data:N.map(r=>({x:xs(r),y:r.neurons.content})),borderColor:CAT_COL.content,backgroundColor:CAT_COL.content,pointRadius:3},
+    {label:"KU type",data:N.map(r=>({x:xs(r),y:r.neurons.type})),borderColor:CAT_COL.type,backgroundColor:CAT_COL.type,pointRadius:3},
+    {label:"predictor dims learned",data:N.map(r=>({x:xs(r),y:r.neurons.pred_learned/(r.neurons.pred_n||1)})),borderColor:PAL[4],backgroundColor:PAL[4],pointRadius:3,borderDash:[4,3]}],{ymin:0,ymax:1});
+}
+
+// ---------------------------------------------------------------- reasoning tasks
+const TASK_KEYS=["forward","inverse","abduction","consistency","intervention"];
+const TASK_NAME={forward:"Forward prediction",inverse:"Experiment design (inverse)",abduction:"Abduction",consistency:"Consistency checking",intervention:"Intervention conditioning"};
+function taskScore(T,k){   // -> {v, txt, lvl, sub}
+  const t=T&&T[k];if(!t)return null;
+  if(k==="consistency"){const v=t.bal_acc;if(v==null)return {v:null,txt:"–",lvl:"",sub:"no claim–evidence edges"};
+    return {v,txt:pct(v),lvl:v>=0.65?"good":v>=0.55?"warn":"bad",sub:`balanced acc. (chance 50%) · supports ${pct(t.recall_supports)} / contradicts ${pct(t.recall_contradicts)} recall · n=${t.n}`};}
+  if(k==="intervention"){const c=t.condition||{},m=t.method||{},v=c.rel_shift;if(v==null)return {v:null,txt:"–",lvl:"",sub:"no donor papers"};
+    return {v,txt:fmt(v,3),lvl:v>=0.3&&c.toward_donor>=0.6?"good":v<0.05?"bad":"warn",
+      sub:`condition swap: rel. shift ${fmt(c.rel_shift,3)}, toward donor ${pct(c.toward_donor)} · method swap: rel. shift ${fmt(m.rel_shift,3)}, toward donor ${pct(m.toward_donor)} · n=${c.n}`};}
+  const v=t.ratio;if(v==null)return {v:null,txt:"–",lvl:"",sub:""};
+  return {v,txt:v.toFixed(2)+"×",lvl:v>=1.5?"good":v>=1.15?"warn":"bad",
+    sub:`MRR ${fmt(t.MRR)} · chance ${fmt(t.chance)} · Hits@1 ${pct(t["Hits@1"])} · Hits@10 ${pct(t["Hits@10"])} · n=${t.n}`+(t.by_target&&Object.keys(t.by_target).length>1?" · "+Object.entries(t.by_target).map(([g,b])=>`${g} ${b.ratio.toFixed(2)}×`).join(", "):"")};
+}
+const lvlBg=l=>l==="good"?"rgba(22,163,74,.35)":l==="warn"?"rgba(217,119,6,.25)":l==="bad"?"rgba(220,38,38,.18)":"";
+const VERDICT={forward:["predicts results from the setup","weak forward prediction","cannot predict the result from problem + method + conditions"],
+  inverse:["recovers the method / material from problem + result","weak inverse design","cannot infer the method / material that produced a result"],
+  abduction:["infers the claim / hypothesis from results + conditions","weak abduction","cannot infer the claim / hypothesis from results"],
+  consistency:["tells supporting from contradicting evidence","weak consistency checking","cannot tell support from contradiction (at chance)"],
+  intervention:["the predicted result follows the swapped condition","the prediction reacts to the condition, but not reliably toward the new result","ignores the condition: swapping it barely changes the predicted result"]};
+function tasksTab(D){
+  const F=D.final||{},R=D.epoch_results||[],last=R[R.length-1];
+  const fromTest=!!(F.tasks&&!F.tasks.note),T=fromTest?F.tasks:(last&&last.tasks)||null;
+  if(D.config.ku_mode==="paper"||(T&&T.note)){$("tk-meta").textContent="Not applicable in paper mode: every task masks one KU type given other KU types of the same paper, and a paper is a single KU.";["tk-table","tk-epochs"].forEach(i=>$(i).innerHTML="");return;}
+  if(!T){$("tk-meta").textContent="Appears at the end of the first epoch (validation) and at the end of training (test). Needs EPOCHS ≥ 1 and eval_tasks on.";["tk-table","tk-epochs"].forEach(i=>$(i).innerHTML="");return;}
+  $("tk-meta").textContent=fromTest?"Final model, test split.":`Latest end-of-epoch evaluation (epoch ${last.epoch}, validation split); the test-split matrix appears when the run finishes.`;
+  $("tk-table").innerHTML=`<tr><th>task</th><th>query</th><th class="num">score</th><th>verdict</th><th>details</th></tr>`+TASK_KEYS.map(k=>{const sc=taskScore(T,k),t=T[k]||{};if(!sc)return "";
+    const vi=sc.lvl==="good"?0:sc.lvl==="warn"?1:2;
+    return `<tr><td><b>${TASK_NAME[k]}</b></td><td class="muted">${esc(t.query||"")}</td><td class="num"><span style="padding:2px 6px;border-radius:4px;background:${lvlBg(sc.lvl)}">${sc.txt}</span></td><td>${sc.v==null?"–":`<span class="${sc.lvl==="good"?"ok":sc.lvl==="warn"?"wa":"no"}">${VERDICT[k][vi]}</span>`}</td><td class="muted" style="font-size:11.5px">${esc(sc.sub)}${k==="consistency"&&t.inter_paper?"<br>inter-paper: "+esc(t.inter_paper):""}${k==="intervention"&&t.note?"<br>"+esc(t.note):""}</td></tr>`;}).join("");
+  const RE=R.filter(r=>r.tasks&&!r.tasks.note);
+  $("tk-epochs").innerHTML=RE.length?`<tr><th>task</th>${RE.map(r=>`<th class="num">epoch ${r.epoch}</th>`).join("")}</tr>`+TASK_KEYS.map(k=>`<tr><td>${TASK_NAME[k]}</td>${RE.map(r=>{const sc=taskScore(r.tasks,k);return sc?`<td class="num" style="background:${lvlBg(sc.lvl)}" title="${esc(sc.sub)}">${sc.txt}</td>`:'<td class="num muted">·</td>';}).join("")}</tr>`).join(""):'<tr><td class="empty">No epoch finished yet.</td></tr>';
+  const g="g-tasks";
+  card(g,"tkep","Retrieval tasks per epoch","balanced MRR ÷ chance (1 = chance, 1.5 = solved)");
+  card(g,"tkcons","Consistency and intervention per epoch","consistency balanced accuracy (chance 0.5); intervention: relative shift and share toward the donor's result");
+  const xs=r=>X()==="epoch"?r.epoch:r.step;
+  line("tkep",["forward","inverse","abduction"].map((k,i)=>({label:TASK_NAME[k],data:RE.filter(r=>r.tasks[k]&&r.tasks[k].ratio!=null).map(r=>({x:xs(r),y:r.tasks[k].ratio})),borderColor:PAL[i],backgroundColor:PAL[i],pointRadius:4,borderWidth:2}))
+    .concat([{label:"chance (1×)",data:RE.map(r=>({x:xs(r),y:1})),borderColor:css("--chance"),borderDash:[6,4],pointRadius:0},{label:"solved (1.5×)",data:RE.map(r=>({x:xs(r),y:1.5})),borderColor:css("--good"),borderDash:[2,4],pointRadius:0}]),{ymin:0});
+  line("tkcons",[{label:"consistency (bal. acc.)",data:RE.filter(r=>r.tasks.consistency&&r.tasks.consistency.bal_acc!=null).map(r=>({x:xs(r),y:r.tasks.consistency.bal_acc})),borderColor:PAL[3],backgroundColor:PAL[3],pointRadius:4,borderWidth:2},
+    {label:"intervention rel. shift",data:RE.filter(r=>r.tasks.intervention&&r.tasks.intervention.condition&&r.tasks.intervention.condition.rel_shift!=null).map(r=>({x:xs(r),y:r.tasks.intervention.condition.rel_shift})),borderColor:PAL[4],backgroundColor:PAL[4],pointRadius:4,borderWidth:2},
+    {label:"intervention toward donor",data:RE.filter(r=>r.tasks.intervention&&r.tasks.intervention.condition&&r.tasks.intervention.condition.toward_donor!=null).map(r=>({x:xs(r),y:r.tasks.intervention.condition.toward_donor})),borderColor:PAL[5],backgroundColor:PAL[5],pointRadius:4,borderWidth:2,borderDash:[4,3]},
+    {label:"chance (0.5)",data:RE.map(r=>({x:xs(r),y:0.5})),borderColor:css("--chance"),borderDash:[6,4],pointRadius:0}],{ymin:0});
+}
+function taskMatrix(ok){
+  const useTest=$("tm-src").value==="best";
+  $("tm-table").innerHTML=`<tr><th>run</th><th>from</th>${TASK_KEYS.map(k=>`<th class="num">${TASK_NAME[k]}</th>`).join("")}</tr>`+ok.slice().reverse().map(d=>{
+    const F=d.final||{},R=d.epoch_results||[],last=R[R.length-1];
+    if(d.config.ku_mode==="paper")return `<tr><td>${esc(d.name)}</td><td class="muted" colspan="${TASK_KEYS.length+1}">n/a in paper mode</td></tr>`;
+    const T=useTest&&F.tasks&&!F.tasks.note?F.tasks:(last&&last.tasks)||null,src=useTest&&F.tasks&&!F.tasks.note?"test":last&&last.tasks?`epoch ${last.epoch}`:"–";
+    return `<tr><td>${esc(d.name)}</td><td class="muted">${src}</td>${TASK_KEYS.map(k=>{const sc=T?taskScore(T,k):null;return sc&&sc.v!=null?`<td class="num" style="background:${lvlBg(sc.lvl)}" title="${esc(sc.sub)}">${sc.txt}</td>`:'<td class="num muted">·</td>';}).join("")}</tr>`;}).join("");
+}
+
+// ---------------------------------------------------------------- world model
+const REL_COL={supported_by:"#16a34a",challenged_by:"#dc2626",implies:"#a865a8",grounds:"#d6247e",produces:"#238b45",
+  motivates:"#8c6bb1",addressed_by:"#6a51a3",implemented_by:"#2171b5",interpreted_by:"#5aa469",limited_by:"#d94801",
+  proxy:"#0891b2",cites:"#ea580c",same_field:"#94a3b8",same_subfield:"#64748b"};
+let wmNet=null,wmIdx=0,wmKey="";
+function wmLatest(D){const F=D.final||{},R=D.epoch_results||[],l=R.slice().reverse().find(r=>r.structure)||{};
+  return F.structure?{s:F.structure,a:F.actions,src:"test"}:(l.structure?{s:l.structure,a:l.actions,src:`epoch ${l.epoch} (val)`}:null);}
+function worldTab(D){
+  const W=wmLatest(D),PM=D.config.ku_mode==="paper_masked";
+  if(!W){$("wm-kpis").innerHTML="";$("wm-verdict").innerHTML='<div class="muted">Appears at the end of the first epoch.</div>';}
+  else{const s=W.s,a=W.a||{},sw=a.swap||{},fl=a.flip||{};
+    $("wm-kpis").innerHTML=[kpi("with graph structure",fmt(s.with,2)+"×","balanced MRR ÷ chance ("+W.src+")"),
+      kpi("without typed edges",fmt(s.without,2)+"×","role, citation, field and proxy links removed"),
+      kpi("accuracy from structure",pct(Math.max(0,s.share)),"share of the above-chance accuracy",s.share>0.1?"ok":"no"),
+      kpi("action: swap a KU",sw.direction_cos==null?"–":fmt(sw.direction_cos,2),`direction cos · ${sw.direction_hit==null?"–":pct(sw.direction_hit)} right way · n=${sw.n||0}`,sw.direction_cos>0.2?"ok":sw.direction_cos>0.05?"wa":"no"),
+      kpi("action: flip support ↔ contradict",fl.direction_cos==null?"–":fmt(fl.direction_cos,2),`direction cos · ${fl.direction_hit==null?"–":pct(fl.direction_hit)} right way · n=${fl.n||0}`,fl.direction_cos>0.2?"ok":fl.direction_cos>0.05?"wa":"no")].join("");
+    const v=[];
+    v.push(s.share>0.1?["good",`Graph structure carries ${pct(s.share)} of the accuracy above chance: removing every typed edge drops balanced MRR from ${fmt(s.with,2)}× to ${fmt(s.without,2)}× chance.`]:
+      ["bad",`The accuracy does not come from graph structure: with every typed edge removed it stays at ${fmt(s.without,2)}× (vs ${fmt(s.with,2)}×). The model uses the KU texts and which KUs share a paper, not the links between them.`]);
+    if(sw.direction_cos!=null)v.push(sw.direction_cos>0.2?["good",`World model: when one KU is swapped for another paper's, the prediction moves the right way (direction cos ${fmt(sw.direction_cos,2)}; ${pct(sw.direction_hit)} of cases).`]:
+      ["warn",`World model: swapping a KU barely moves the prediction the right way (direction cos ${fmt(sw.direction_cos,2)}; chance 0). Train with actions (experiment E19) to learn this.`]);
+    if(fl.direction_cos!=null)v.push(fl.direction_cos>0.2?["good",`Flipping a supports ↔ contradicts edge (a pure structure change) moves the prediction the right way (cos ${fmt(fl.direction_cos,2)}).`]:
+      ["warn",`Flipping a supports ↔ contradicts edge, a pure structure change, has no learned effect yet (cos ${fmt(fl.direction_cos,2)}).`]);
+    if(PM)v.push(["info","Paper-as-text runs show the own paper as one text, so there is no KU or edge of it to act on; actions are measured in section mode."]);
+    $("wm-verdict").innerHTML=v.map(([l,t])=>`<div class="find ${l}"><span class="i">${ICON[l]}</span><div>${t}</div></div>`).join("");}
+  const g="g-world",R=(D.epoch_results||[]).filter(r=>r.structure);
+  card(g,"wmstruct","Does the model use graph structure? (per epoch)","balanced MRR ÷ chance with and without typed edges; the gap is what structure contributes");
+  card(g,"wmact","Does it predict the effect of actions? (per epoch)","direction cos between the predicted and the true change of the hidden KU (0 = no idea, 1 = perfect)");
+  const xs=r=>X()==="epoch"?r.epoch:r.step;
+  line("wmstruct",[{label:"with typed edges",data:R.map(r=>({x:xs(r),y:r.structure.with})),borderColor:PAL[0],backgroundColor:PAL[0],pointRadius:4,borderWidth:2},
+    {label:"without typed edges",data:R.map(r=>({x:xs(r),y:r.structure.without})),borderColor:PAL[1],backgroundColor:PAL[1],pointRadius:4,borderWidth:2,borderDash:[6,4]},
+    {label:"· chance",data:R.map(r=>({x:xs(r),y:1})),borderColor:css("--chance"),borderDash:[4,4],pointRadius:0}],{ymin:0});
+  line("wmact",["swap","flip"].map((k,i)=>({label:k==="swap"?"swap a KU":"flip support/contradict",data:R.filter(r=>r.actions&&r.actions[k]&&r.actions[k].direction_cos!=null).map(r=>({x:xs(r),y:r.actions[k].direction_cos})),borderColor:PAL[2+i],backgroundColor:PAL[2+i],pointRadius:4,borderWidth:2}))
+    .concat([{label:"· zero",data:R.map(r=>({x:xs(r),y:0})),borderColor:css("--chance"),borderDash:[4,4],pointRadius:0}]));
+  wmGraph(D);
+}
+function wmGraph(D){
+  const V=D.worldview,E=(V&&V.examples)||[];
+  if(!E.length){$("wm-pick").innerHTML="";$("wm-side").innerHTML='<div class="muted">Example subgraphs appear at the end of the first epoch.</div>';return;}
+  if(wmIdx>=E.length)wmIdx=0;
+  $("wm-pick").innerHTML=E.map((e,i)=>`<button data-i="${i}" style="${i===wmIdx?"background:var(--accent);color:#fff":""}">hidden ${esc(e.type)}</button>`).join(" ");
+  $("wm-pick").querySelectorAll("button").forEach(b=>b.onclick=()=>{wmIdx=+b.dataset.i;wmKey="";wmGraph(DATA);});
+  $("wm-att").onchange=()=>{wmKey="";wmGraph(DATA);};
+  const e=E[wmIdx],key=`${V.step}|${wmIdx}|${$("wm-att").value}|${document.documentElement.dataset.theme||""}`;
+  wmSide(e,V);
+  if(key===wmKey||!window.vis)return;wmKey=key;
+  const A=$("wm-att").value,mx=Math.max(1e-9,...e.nodes.filter(n=>!n.masked).map(n=>n[A])),emx=Math.max(1e-9,...e.edges.map(x=>x.importance));
+  const txt=css("--text");
+  const nodes=e.nodes.map(n=>{const col=n.type==="paper hub"?"#94a3b8":(TYPE_COL[n.type]||"#64748b");const w=n.masked?1:n[A]/mx;
+    return {id:n.id,label:n.masked?`? ${n.type}`:(n.type==="paper hub"?`paper ${n.slot===0?"(own)":n.slot}`:n.type),shape:n.type==="paper hub"?"box":"dot",
+      size:n.type==="paper hub"?14:8+30*w,color:{background:col,border:n.masked?"#dc2626":col},borderWidth:n.masked?5:1,
+      font:{color:txt,size:n.masked?16:12},title:`${n.type}${n.paper?" · "+n.paper:""}\nattention ${(100*n[A]).toFixed(1)}%\n${n.text||""}`};});
+  e.ghosts.forEach(gh=>nodes.push({id:gh.id,label:`hidden ${gh.type}`,shape:"dot",size:9,color:{background:"rgba(148,163,184,.25)",border:"#94a3b8"},
+    borderWidth:1,shapeProperties:{borderDashes:[4,3]},font:{color:css("--muted"),size:11},title:`hidden from the model (it restates the answer)\n${gh.text}`}));
+  const edges=[...e.member.map(m=>({from:m.from,to:m.to,color:{color:"rgba(148,163,184,.35)"},width:1})),
+    ...e.edges.map(x=>({from:x.from,to:x.to,width:1+9*x.importance/emx,color:{color:REL_COL[x.rel]||"#64748b"},dashes:x.inter,
+      title:`${x.rel}${x.inter?" (between papers)":""}\nremoving it changes the prediction by ${(100*x.importance).toFixed(3)}%`})),
+    ...e.hidden_edges.map(h=>({from:h.from,to:h.to,color:{color:"#dc2626"},dashes:[6,4],width:2,label:h.rel,font:{color:"#dc2626",size:10,strokeWidth:0},title:`true link of the hidden KU (not shown to the model): ${h.rel}`}))];
+  if(wmNet)wmNet.destroy();
+  wmNet=new vis.Network($("wm-net"),{nodes:new vis.DataSet(nodes),edges:new vis.DataSet(edges)},
+    {physics:{solver:"forceAtlas2Based",stabilization:{iterations:200}},interaction:{hover:true,tooltipDelay:80},edges:{smooth:false}});
+}
+function wmSide(e,V){
+  const att=e.top_attention.map(t=>`<li>${esc(t.type)}${t.type==="paper hub"?"":t.own_paper?" (same paper)":" (other paper)"}: <b>${(100*t.share).toFixed(1)}%</b></li>`).join("");
+  const strongest=e.edges.slice().sort((a,b)=>b.importance-a.importance)[0];
+  const a=e.action;
+  let act="";
+  if(a){act=a.kind==="swap"?`<b>Action: swap the ${esc(a.type)}</b> for another paper's.<br><span class="muted">old: ${esc(a.old_text||"")}<br>new: ${esc(a.new_text||"")}</span><br>`:
+      `<b>Action: flip a claim–evidence edge to ${esc(a.to)}.</b><br>`;
+    act+=`Predicted change vs true change of the hidden KU: direction cos <b class="${a.direction_cos>0.2?"ok":a.direction_cos>0?"wa":"no"}">${fmt(a.direction_cos,2)}</b>, size ratio ${fmt(a.magnitude,2)}.`;}
+  const pid=String(e.paper||"").split("/").pop().replace(/\.json$/,"");
+  $("wm-side").innerHTML=`<p><b>Hidden: ${esc(e.type)}</b> of paper <code style="overflow-wrap:anywhere">${esc(pid)}</code> (${V.final?"test":"validation"}, epoch ${fmt(V.epoch,2)}).</p>
+   <p>The model ranks the true KU <b class="${e.rank<=3?"ok":"no"}">#${e.rank??"–"}</b> of ${e.pool} candidates.</p>
+   <p><b>It looked most at</b></p><ul style="margin:0 0 10px;padding-left:18px">${att}</ul>
+   <p><b>Structure:</b> removing all typed edges changes the prediction by ${(100*e.no_structure_shift).toFixed(3)}%; the most important single edge${strongest?` (${esc(strongest.rel)})`:""} by ${(100*e.max_edge_shift).toFixed(3)}%.${e.no_structure_shift<0.001?' <span class="no">The prediction barely depends on the links.</span>':""}</p>
+   <p><b>Top answers</b></p><ol style="margin:0 0 10px;padding-left:18px">${e.top.map(t=>`<li class="${t.gold?"ok":""}">${t.gold?"✓ ":""}${esc(t.text.slice(0,110))}</li>`).join("")}</ol>
+   <p>${act||'<span class="muted">No action possible for this paper.</span>'}</p>`;
+}
+
+// ---------------------------------------------------------------- neurons
+let nSort={k:"o_paper",d:-1};
+function neuronsTab(D){
+  const N=D.neurons_latest,T=D.neuron_timeline||[];
+  if(!N){$("n-meta").textContent="The first neuron report appears with the first validation pass (every eval_every steps).";$("n-verdicts").innerHTML="";$("n-table").innerHTML="";$("p-table").innerHTML="";return;}
+  $("n-meta").textContent=`${N.final?"Final report on the test split":"Latest report on the validation split"} at epoch ${fmt(N.epoch,2)} (step ${N.step}): ${N.n_instances} masked instances, ${N.n_tokens} visible KU tokens.`;
+  $("n-verdicts").innerHTML=N.layers.map(l=>{const n=ncount(l);const lvl=l.counts.identity/n>0.1?"warn":l.counts.dead/n>0.2?"bad":"good";return `<div class="find ${lvl}"><span class="i">${ICON[lvl]}</span><div>${esc(l.verdict)}</div></div>`;}).join("")+
+    `<div class="find ${N.predictor.learned>0.2*N.predictor.n?"good":"bad"}"><span class="i">${N.predictor.learned>0.2*N.predictor.n?ICON.good:ICON.bad}</span><div><b>Predictor</b>${esc(N.predictor.verdict)}</div></div>`;
+  const g="g-neurons";
+  card(g,"ncat","Neuron labels per layer (latest)","how many neurons of each layer fall in each category",280);
+  card(g,"nid","Paper-identity neurons over training","share of neurons per layer whose activity mainly tells papers apart. Rising = the model is building the shortcut.",280);
+  card(g,"ncontent","Content neurons over training","share of distributed content / relational neurons per layer",280);
+  card(g,"nlearn","Predictor dimensions that learned the target","count of predictor outputs following the target's content (within type)",280);
+  card(g,"nomega","Average variance share per layer (latest)","mean ω² of type / paper / field across a layer's neurons",280);
+  const labels=N.layers.map(l=>l.name.replace("encoder ",""));
+  bar("ncat",labels,CATS.map(c=>({label:c,data:N.layers.map(l=>l.counts[c]),backgroundColor:CAT_COL[c]})),{stacked:true});
+  const nlay=T.length?T[0].layers.length:0,tx=t=>X()==="epoch"?t.epoch:t.step;
+  const share=k=>Array.from({length:nlay},(_,li)=>({label:T[0].layers[li].name.replace("encoder ",""),data:T.map(t=>({x:tx(t),y:t.layers[li].counts[k]/ncount(t.layers[li])})),borderColor:PAL[li%PAL.length],backgroundColor:PAL[li%PAL.length],pointRadius:2,borderWidth:2}));
+  if(nlay){line("nid",share("identity"),{ymin:0,ymax:1});line("ncontent",share("content"),{ymin:0,ymax:1});}
+  line("nlearn",[{label:"learned dims",data:T.map(t=>({x:tx(t),y:t.pred_learned})),borderColor:PAL[2],backgroundColor:PAL[2],pointRadius:2,borderWidth:2},{label:"total dims",data:T.map(t=>({x:tx(t),y:t.pred_n})),borderColor:css("--chance"),borderDash:[6,4],pointRadius:0}],{ymin:0});
+  bar("nomega",labels,[{label:"KU type",data:N.layers.map(l=>l.mean_o_type),backgroundColor:CAT_COL.type},{label:"paper identity",data:N.layers.map(l=>l.mean_o_paper),backgroundColor:CAT_COL.identity},{label:"field",data:N.layers.map(l=>l.mean_o_field),backgroundColor:CAT_COL.field}],{ymax:1});
+  const ls=$("n-layer"),cs=$("n-cat");
+  if(ls.dataset.k!==String(N.step)+N.final){const cur=ls.value;ls.innerHTML=`<option value="">all layers</option>`+N.layers.map(l=>`<option>${l.name}</option>`).join("");ls.value=cur;ls.dataset.k=String(N.step)+N.final;
+    if(cs.options.length<2)cs.innerHTML+=CATS.map(c=>`<option>${c}</option>`).join("");
+    [ls,cs,$("n-q"),$("p-filter")].forEach(e=>e.oninput=()=>neuronTables(DATA.neurons_latest));}
+  neuronTables(N);
+}
+function neuronTables(N){
+  if(!N)return;let r=N.neurons.filter(x=>(!$("n-layer").value||x.layer===$("n-layer").value)&&(!$("n-cat").value||x.category===$("n-cat").value));
+  const q=$("n-q").value.toLowerCase();if(q)r=r.filter(x=>(x.label+x.top_type+x.top_field).toLowerCase().includes(q));
+  r=[...r].sort((a,b)=>nSort.d*((a[nSort.k]>b[nSort.k])-(a[nSort.k]<b[nSort.k])));
+  $("n-n").textContent=`${r.length} neurons`+(r.length>400?" (first 400 shown)":"");
+  const cols=[["layer","layer"],["neuron","#"],["category","label"],["o_type","ω² type"],["o_paper","ω² paper"],["o_field","ω² field"],["r_leak","r leak"],["std","std"]];
+  $("n-table").innerHTML=`<tr>${cols.map(([k,l])=>`<th class="sort" data-k="${k}">${l}${nSort.k===k?(nSort.d>0?" ▲":" ▼"):""}</th>`).join("")}<th>human-readable interpretation</th></tr>`+r.slice(0,400).map(x=>`<tr><td>${x.layer.replace("encoder ","")}</td><td class="num">${x.neuron}</td><td><span class="pill c-${x.category}">${x.category}</span></td><td class="num">${fmt(x.o_type,2)}</td><td class="num ${x.o_paper>=0.5?"no":""}">${fmt(x.o_paper,2)}</td><td class="num">${fmt(x.o_field,2)}</td><td class="num ${Math.abs(x.r_leak)>=0.3?"wa":""}">${fmt(x.r_leak,2)}</td><td class="num">${fmt(x.std,3)}</td><td>${esc(x.label)}<br><span class="muted">most active for type '${esc(x.top_type)}', field '${esc(x.top_field)}'</span></td></tr>`).join("");
+  $("n-table").querySelectorAll("th.sort").forEach(th=>th.onclick=()=>{const k=th.dataset.k;nSort=nSort.k===k?{k,d:-nSort.d}:{k,d:-1};neuronTables(DATA.neurons_latest);});
+  const f=$("p-filter").value;let p=N.predictor_neurons.filter(x=>!f||(f==="type"?x.label.startsWith("only"):f==="leak"?x.label.startsWith("moves"):x.label.startsWith(f)));
+  p=[...p].sort((a,b)=>b.r_target-a.r_target);$("p-n").textContent=`${p.length} of ${N.predictor_neurons.length} outputs`;
+  $("p-table").innerHTML=`<tr><th>#</th><th>r target (within type)</th><th>ω² KU type</th><th>r leak</th><th>std</th><th>interpretation</th></tr>`+p.slice(0,300).map(x=>`<tr><td class="num">${x.neuron}</td><td class="num ${x.r_target>=0.5?"ok":""}">${fmt(x.r_target,2)}</td><td class="num">${fmt(x.o_ktype,2)}</td><td class="num">${fmt(x.r_leak,2)}</td><td class="num">${fmt(x.std,3)}</td><td>${esc(x.label)}</td></tr>`).join("");
+}
+
+// ---------------------------------------------------------------- where / examples / graphs
+function where(D,H,E,F){
+  const g="g-where";
+  if(!F.per_type){$(g).innerHTML='<div class="empty">Final test metrics appear when the run finishes. Live validation is in the Validation tab.</div>';return;}
+  if($(g).querySelector(".empty"))$(g).innerHTML="";
+  card(g,"wtype","By masked KU type (test)","balanced MRR vs chance: which KU types it can recover");
+  card(g,"wfield","By field (test, top fields)","which research areas it learns");
+  card(g,"wsim","By leak level","MRR vs how similar the most similar visible KU is to the target: high-similarity bins = paraphrase shortcut, not reasoning");
+  card(g,"wsame","Identity shortcut","fraction of queries whose top-1 KU comes from the SAME paper, by type");
+  card(g,"whist","Rank distribution (balanced)","where the true KU lands among ~101 candidates");
+  card(g,"winv","Inverse head by relation","which hidden relations the encoder preserves (≈0.5 = chance for edge vs no-edge pairs)");
+  const pt=F.per_type,tk=Object.keys(pt);
+  bar("wtype",tk,[{label:"balanced MRR",data:tk.map(k=>pt[k].MRR_bal),backgroundColor:tk.map(k=>TYPE_COL[k])},{label:"chance",data:tk.map(k=>pt[k].chance_bal),backgroundColor:css("--chance")}]);
+  const pf=F.per_field||{},fk=Object.keys(pf).sort((a,b)=>pf[b].MRR_bal-pf[a].MRR_bal);
+  bar("wfield",fk.map(k=>`${k} (n=${pf[k].n})`),[{label:"balanced MRR",data:fk.map(k=>pf[k].MRR_bal),backgroundColor:PAL[0]},{label:"chance",data:fk.map(k=>pf[k].chance_bal),backgroundColor:css("--chance")}],{horizontal:true});
+  const ps=F.by_ctx_sim||{},sk=Object.keys(ps).sort();
+  bar("wsim",sk.map(k=>`${k} (n=${ps[k].n})`),[{label:"balanced MRR",data:sk.map(k=>ps[k].MRR_bal),backgroundColor:PAL[3]},{label:"chance",data:sk.map(k=>ps[k].chance_bal),backgroundColor:css("--chance")}]);
+  bar("wsame",tk,[{label:"top-1 from same paper",data:tk.map(k=>pt[k].top1_same_paper),backgroundColor:tk.map(k=>TYPE_COL[k])}]);
+  bar("whist",F.rank_hist_edges||[],[{label:"queries",data:F.rank_hist_bal||[],backgroundColor:PAL[0]}]);
+  const iv=F.inverse_per_rel||{},ik=Object.keys(iv);
+  bar("winv",ik.map(k=>`${k} (n=${iv[k].n})`),[{label:"accuracy",data:ik.map(k=>iv[k].acc),backgroundColor:PAL[2]}],{horizontal:true});
+}
+function examples(D,H,E,F){
+  const I=F.instances||[];const sel=$("ex-type");
+  if(!sel.options.length&&I.length){sel.innerHTML=`<option value="">all types</option>`+[...new Set(I.map(r=>r.type))].map(t=>`<option>${t}</option>`).join("");[sel,$("ex-sort"),$("ex-q")].forEach(e=>e.oninput=()=>examples(DATA,0,0,DATA.final||{}));}
+  if(!I.length){$("ex").innerHTML='<tr><td class="empty">Appears when the run finishes.</td></tr>';return;}
+  let r=I.filter(x=>!sel.value||x.type===sel.value);const q=$("ex-q").value.toLowerCase();
+  if(q)r=r.filter(x=>(x.target+x.top1+x.field).toLowerCase().includes(q));
+  const s=$("ex-sort").value;r=[...r].sort(s==="best"?(a,b)=>a.rank_bal-b.rank_bal:s==="worst"?(a,b)=>b.rank_bal-a.rank_bal:(a,b)=>b.max_ctx_sim-a.max_ctx_sim);
+  $("ex-n").textContent=`${r.length} queries`;
+  $("ex").innerHTML=`<tr><th>type</th><th>rank</th><th>field</th><th>leak sim</th><th>target (masked)</th><th>top-1 prediction</th></tr>`+r.slice(0,300).map(x=>`<tr><td>${x.type}</td><td class="num ${x.rank_bal<=1?"ok":x.rank_bal>x.pool/2?"no":""}">${x.rank_bal|0}/${x.pool+1}</td><td>${esc(x.field)}<br><span class="muted">${x.year}</span></td><td class="num ${x.flagged?"no":""}">${fmt(x.max_ctx_sim,2)}</td><td>${esc(x.target)}</td><td>${x.top1_same_paper&&D.config.ku_mode!=="paper"?"★ ":""}${esc(x.top1)}</td></tr>`).join("");
+}
+let graphsLoaded=false;
+async function graphs(){
+  if(graphsLoaded)return;graphsLoaded=true;
+  try{const G=await j("graphs.json");$("gsel").innerHTML=G.map(g=>`<option value="${g.path}">${esc(g.title)}</option>`).join("");
+    const go=()=>{$("gframe").src=$("gsel").value;$("gopen").href=$("gsel").value;};$("gsel").onchange=go;go();}
+  catch(e){$("gsel").innerHTML="<option>no graphs yet: run the graph cell of the notebook</option>";}
+}
+
+// ---------------------------------------------------------------- all runs
+const CMP={"val balanced MRR":["evals","bal_MRR"],"val balanced MRR ÷ chance":["evals","ratio"],"train JEPA loss":["history","jepa"],"cos(pred, target)":["history","cos_pred_target"],"pred pairwise cos (collapse)":["history","pred_pairwise_cos"],"paper-identity probe":["evals","probe_acc"],"chi":["evals","chi"],"identity-neuron share (encoder output)":["neuron_timeline","idshare"],"predictor dims learned":["neuron_timeline","pred_learned"],"paraphrase-leak rate":["history","flagged"]};
+$("cmp-metric").innerHTML=Object.keys(CMP).map(k=>`<option>${k}</option>`).join("");$("cmp-metric").onchange=()=>runsTab(true);
+async function runsTab(force){
+  const now=Date.now();if(!force&&now-lastRunsFetch<4000)return;lastRunsFetch=now;
+  try{RUNS=await j("runs.json");}catch(e){return;}
+  const got=await Promise.all(RUNS.map(r=>(r.path===RUN&&DATA)?Promise.resolve(DATA):j(r.path).catch(()=>null)));
+  got.forEach((d,i)=>{if(d)ALL[RUNS[i].path]=d;});
+  const ok=RUNS.map(r=>ALL[r.path]).filter(Boolean);
+  $("runs-table").innerHTML=`<tr><th>run</th><th>status</th><th>progress</th><th>epoch</th><th>KUs</th><th>masking</th><th>N</th><th>train loss</th><th>cos</th><th>val bal. MRR</th><th>chance</th><th>probe</th><th>id. neurons</th><th>pred learned</th><th>test bal. MRR</th><th>verdict</th></tr>`+ok.slice().reverse().map(d=>{
+    const H=d.history||[],E=d.evals||[],h=H[H.length-1]||{},e=E[E.length-1]||{},F=d.final||{},rb=F.retrieval_balanced||{},nl=(d.neuron_timeline||[]).slice(-1)[0];
+    const L=nl?nl.layers[nl.layers.length-1]:null,idp=L?L.counts.identity/ncount(L):null;
+    const r=e.bal_MRR/(e.bal_chance||1);const verdict=e.bal_MRR==null?"–":r>2?'<span class="ok">learning</span>':r>1.3?'<span class="wa">weak</span>':(h.cos_pred_target>0.95?'<span class="no">shortcut (cos≈1, MRR≈chance)</span>':'<span class="no">at chance</span>');
+    const prog=h.step!=null?Math.round(100*(h.step+1)/(d.steps_total||1)):0,stt=String(d.status).split(":")[0];
+    return `<tr><td><a href="#" data-run="runs/${esc(d.name)}/live.json">${esc(d.name)}</a></td><td><span class="badge ${stt}">${esc(stt)}</span></td><td class="num">${prog}%</td><td class="num">${fmt(h.epoch,2)}${d.epochs_total?"/"+fmt(d.epochs_total,2):""}</td><td>${MODE_NAME[d.config.ku_mode]||"sections"}</td><td>${esc((d.schedule||{}).schedule||"")}${h.phase&&h.phase!=="mixed"?" · "+esc(h.phase):""}</td><td class="num">${d.config.n_subgraphs}</td><td class="num">${fmt(h.jepa,4)}</td><td class="num">${fmt(h.cos_pred_target,3)}</td><td class="num">${fmt(e.bal_MRR)}</td><td class="num">${fmt(e.bal_chance)}</td><td class="num">${fmt(e.probe_acc,2)}</td><td class="num">${pct(idp)}</td><td class="num">${nl?nl.pred_learned+"/"+nl.pred_n:"–"}</td><td class="num">${fmt(rb.MRR)}</td><td>${verdict}</td></tr>`;}).join("");
+  $("runs-table").querySelectorAll("a[data-run]").forEach(a=>a.onclick=ev=>{ev.preventDefault();$("follow").checked=false;selectRun(a.dataset.run);tab="overview";showTab();});
+  ptTable(ok);epochMatrix(ok);taskMatrix(ok);
+  const [src,key]=CMP[$("cmp-metric").value];
+  const ds=ok.map((d,i)=>{let rows=d[src]||[];
+    if(key==="ratio")rows=rows.map(r=>({...r,ratio:r.bal_MRR/(r.bal_chance||1)}));
+    if(key==="idshare")rows=rows.map(t=>{const L=t.layers[t.layers.length-1];return {...t,idshare:L.counts.identity/ncount(L)};});
+    return ser(rows,key,d.name,PAL[i%PAL.length],{pointRadius:1.5});});
+  line("cmp",ds,{ymin:0});
+}
+
+function ptTable(ok){
+  const T=["context","question","method","procedure","result","interpretation","limitation","claim","evidence","implication","paper"];
+  const test=$("pt-src").value==="test",ratio=$("pt-val").value==="ratio";
+  const cell=(m,c)=>{if(m==null)return '<td class="num muted">·</td>';const r=m/(c||1);const a=Math.min(1,Math.max(0,(r-1)/2));
+    const bg=r>=1.5?`rgba(22,163,74,${0.15+0.5*a})`:r>=1.15?"rgba(217,119,6,.25)":"rgba(220,38,38,.18)";
+    return `<td class="num" style="background:${bg}" title="MRR ${fmt(m)} · chance ${fmt(c)} · ${r.toFixed(2)}× chance">${ratio?r.toFixed(2)+"×":fmt(m)}</td>`;};
+  $("pt-table").innerHTML=`<tr><th>run</th><th>epoch</th>${T.map(t=>`<th style="color:${TYPE_COL[t]}">${t}</th>`).join("")}<th>types learned</th></tr>`+ok.slice().reverse().map(d=>{
+    const E=d.evals||[],e=E[E.length-1]||{},h=(d.history||[]).slice(-1)[0]||{},F=d.final||{};
+    let M={},C={};
+    if(test){for(const[t,v]of Object.entries(F.per_type||{})){M[t]=v.MRR_bal;C[t]=v.chance_bal;}}
+    else{M=e.per_type||{};C=e.per_type_chance||{};}
+    const n=Object.keys(M).length,ln=Object.keys(M).filter(t=>M[t]/(C[t]||1)>=1.5).length;
+    return `<tr><td>${esc(d.name)}</td><td class="num">${fmt(h.epoch,2)}</td>${T.map(t=>cell(M[t],C[t])).join("")}<td class="num">${n?ln+"/"+n:"–"}</td></tr>`;}).join("");
+}
+$("pt-src").onchange=$("pt-val").onchange=$("em-metric").onchange=$("tm-src").onchange=()=>runsTab(true);
+const ratioBg=r=>r==null?"":r>=1.5?`rgba(22,163,74,${0.15+0.5*Math.min(1,(r-1)/2)})`:r>=1.15?"rgba(217,119,6,.25)":"rgba(220,38,38,.18)";
+const EM={ratio:[r=>r.bal_MRR/(r.bal_chance||1),v=>v.toFixed(2)+"×",1],mrr:[r=>r.bal_MRR,v=>fmt(v),1],learned:[r=>r.types_learned,v=>v+"/"+"",1],
+  loss:[r=>r.train_jepa,v=>fmt(v,4),-1],identity:[r=>r.neurons?r.neurons.identity:null,v=>pct(v),-1],probe:[r=>r.probe_acc,v=>fmt(v,2),-1]};
+function epochMatrix(ok){
+  const k=$("em-metric").value,[get,show,dir]=EM[k];
+  const maxE=Math.max(0,...ok.map(d=>(d.epoch_results||[]).length));
+  if(!maxE){$("em-table").innerHTML='<tr><td class="empty">No epoch has finished yet (needs EPOCHS ≥ 1).</td></tr>';return;}
+  $("em-table").innerHTML=`<tr><th>run</th>${Array.from({length:maxE},(_,i)=>`<th class="num">epoch ${i+1}</th>`).join("")}<th>best</th></tr>`+ok.slice().reverse().map(d=>{
+    const R=d.epoch_results||[],vals=R.map(get),valid=vals.filter(v=>v!=null);
+    const best=valid.length?(dir>0?Math.max(...valid):Math.min(...valid)):null,bi=vals.indexOf(best);
+    return `<tr><td>${esc(d.name)}</td>${Array.from({length:maxE},(_,i)=>{const r=R[i];if(!r)return '<td class="num muted">·</td>';const v=get(r);
+      const bg=k==="ratio"?ratioBg(v):k==="mrr"?ratioBg(r.bal_MRR/(r.bal_chance||1)):"";
+      return `<td class="num" style="${bg?"background:"+bg:""}" title="epoch ${r.epoch}: MRR ${fmt(r.bal_MRR)} · chance ${fmt(r.bal_chance)} · ${r.types_learned}/${Object.keys(r.per_type).length} types learned">${v==null?"–":(k==="learned"?v+"/"+Object.keys(r.per_type).length:show(v))}${i===bi?" ★":""}</td>`;}).join("")}<td class="num">${bi>=0?"epoch "+(bi+1):"–"}</td></tr>`;}).join("");
+}
+
+// ---------------------------------------------------------------- benchmark
+const TK=d=>(d.final||{}).tasks||{};
+const tsub=(d,k,t)=>{const b=(TK(d)[k]||{}).by_target||{};return b[t]?b[t].ratio:null;};
+const rIndex=d=>{const T=TK(d);if(T.macro&&T.macro.index!=null)return T.macro.index;return rMicro(d);};
+const rMicro=d=>{const T=TK(d);const v=[T.forward?.ratio,T.inverse?.ratio,T.abduction?.ratio,
+  T.consistency?.bal_acc!=null?T.consistency.bal_acc/0.5:null,T.intervention?.condition?.toward_donor!=null?T.intervention.condition.toward_donor/0.5:null].filter(x=>x!=null&&!isNaN(x));
+  return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;};
+const rSolved=d=>{const T=TK(d);if(!Object.keys(T).length)return null;let n=0;
+  for(const k of ["forward","inverse","abduction"])if((T[k]||{}).ratio>=1.5)n++;
+  if((T.consistency||{}).bal_acc>=0.65)n++;
+  const c=(T.intervention||{}).condition||{};if(c.rel_shift>=0.3&&c.toward_donor>=0.6)n++;return n;};
+const RCOLS=[
+ ["rindex","Reasoning index (macro over domains)",rIndex,"x",1],
+ ["rmicro","· micro (all queries)",rMicro,"x",1],
+ ["worstdom","· worst domain (forward)",d=>(TK(d).forward||{}).worst_domain?.ratio??null,"x",1],
+ ["rsolved","Tasks solved (of 5)",rSolved,"n",1],
+ ["forward","Forward prediction",d=>TK(d).forward?.ratio??null,"x",1],
+ ["fwd_mp","· beats its counterfactuals",d=>TK(d).forward?.mp_pair??null,"%",1],
+ ["inverse","Experiment design",d=>TK(d).inverse?.ratio??null,"x",1],
+ ["inv_m","· method",d=>tsub(d,"inverse","method"),"x",1],
+ ["inv_p","· material / procedure",d=>tsub(d,"inverse","procedure"),"x",1],
+ ["inv_mp","· beats its counterfactuals",d=>TK(d).inverse?.mp_pair??null,"%",1],
+ ["inv_sub","· beats substitutions",d=>TK(d).inverse?.mp_by_kind?.substitution??null,"%",1],
+ ["abduction","Abduction",d=>TK(d).abduction?.ratio??null,"x",1],
+ ["abd_c","· claim",d=>tsub(d,"abduction","claim"),"x",1],
+ ["abd_q","· hypothesis (question)",d=>tsub(d,"abduction","question"),"x",1],
+ ["abd_mp","· beats its counterfactuals",d=>TK(d).abduction?.mp_pair??null,"%",1],
+ ["consistency","Consistency",d=>TK(d).consistency?.bal_acc??null,"%",1],
+ ["cons_c","· contradicts recall",d=>TK(d).consistency?.recall_contradicts??null,"%",1],
+ ["iv_toward","Intervention: toward new result",d=>TK(d).intervention?.condition?.toward_donor??null,"%",1],
+ ["iv_shift","Intervention: shift",d=>TK(d).intervention?.condition?.rel_shift??null,"c",1],
+ ["iv_m","· method swap toward",d=>TK(d).intervention?.method?.toward_donor??null,"%",1]];
+const BCOLS=[
+ ["test","Test MRR ÷ chance",d=>{const r=(d.final||{}).retrieval_balanced;return r&&r.MRR!=null?r.MRR/(r.chance_MRR||1):null;},"x",1],
+ ["val","Best val ÷ chance",d=>{const R=d.epoch_results||[];return R.length?Math.max(...R.map(r=>r.bal_MRR/(r.bal_chance||1))):null;},"x",1],
+ ["types","KU types learned",d=>{const P=(d.final||{}).per_type;if(!P)return null;const v=Object.values(P);return v.filter(t=>t.MRR_bal>=1.5*t.chance_bal).length/Math.max(1,v.length);},"%",1],
+ ["structure","From structure",d=>{const s=(d.final||{}).structure;return s?s.with-s.without:null;},"dx",1],
+ ["swap","Action: swap",d=>(((d.final||{}).actions||{}).swap||{}).direction_cos??null,"c",1],
+ ["flip","Action: flip",d=>(((d.final||{}).actions||{}).flip||{}).direction_cos??null,"c",1],
+ ["best_ep","Best epoch",d=>((d.final||{}).run_length||{}).best_epoch??null,"n",0],
+ ["ep_run","Epochs trained",d=>((d.final||{}).run_length||{}).epochs_trained??null,"n",0],
+ ["time","Train time",d=>(d.final||{}).train_sec??null,"s",-1]];
+const FAMILY={comparison:"comparison system",gnn:"JEPA + GNN",jepa:"JEPA"};
+const famOf=d=>{if(d.family)return d.family;const c=d.config||{};if(c.baseline||d.arm==="text_baseline")return "comparison";return ["rgat","gnn","gine","gps"].includes(c.encoder)?"gnn":"jepa";};
+const FAMCOL={comparison:"var(--muted)",gnn:"#7c3aed",jepa:"#2563eb"};
+const famPill=f=>`<span class="pill" style="background:${FAMCOL[f]}">${FAMILY[f]}</span>`;
+const armName=a=>{const i=a.indexOf("__");return i<0?esc(a):`${esc(a.slice(i+2))} <span class="muted">${esc(a.slice(0,i))}</span>`;};
+const bfmt=(v,k)=>v==null||isNaN(v)?"–":k==="n"?v.toFixed(v%1?1:0):k==="x"?v.toFixed(2)+"×":k==="dx"?(v>=0?"+":"")+v.toFixed(2)+"×":k==="%"?pct(v):k==="c"?v.toFixed(2):k==="s"?Math.round(v)+" s":fmt(v);
+const mstd=a=>{const v=a.filter(x=>x!=null&&!isNaN(x));if(!v.length)return [null,null,0];const m=v.reduce((p,c)=>p+c,0)/v.length;return [m,v.length>1?Math.sqrt(v.reduce((p,c)=>p+(c-m)**2,0)/(v.length-1)):null,v.length];};
+let benchInit=false;
+async function benchTab(force){
+  const now=Date.now();if(!force&&now-lastRunsFetch<4000&&benchInit)return;lastRunsFetch=now;
+  try{RUNS=await j("runs.json");}catch(e){return;}
+  const got=await Promise.all(RUNS.map(r=>j(r.path).catch(()=>null)));got.forEach((d,i)=>{if(d)ALL[RUNS[i].path]=d;});
+  const D=RUNS.map(r=>ALL[r.path]).filter(d=>d&&d.experiment&&d.experiment!=="single");
+  const exps=[...new Set(D.map(d=>d.experiment))];
+  if(!exps.length){$("bench-head").innerHTML='<div class="empty">No experiment runs yet. Set EXPERIMENTS = ["BENCH"] in the notebook.</div>';return;}
+  const sel=$("bench-exp"),opts=exps.slice().reverse().map(e=>`<option>${esc(e)}</option>`).join("");
+  if(sel.dataset.o!==opts){const v=sel.value;sel.innerHTML=opts;sel.dataset.o=opts;sel.value=v&&exps.includes(v)?v:(exps.includes("BENCH")?"BENCH":exps[exps.length-1]);}
+  if(!benchInit){benchInit=true;sel.onchange=()=>{resetCharts();benchTab(true);};$("bench-fam").onchange=()=>{resetCharts();benchTab(true);};}
+  const E=sel.value,FAM=$("bench-fam").value,runs=D.filter(d=>d.experiment===E),arms=[...new Set(runs.map(d=>d.arm))];
+  const allRows=arms.map(a=>{const rs=runs.filter(d=>d.arm===a),fin=rs.filter(d=>String(d.status).startsWith("done"));
+    const vals={};[...BCOLS,...RCOLS].forEach(([k,,f])=>vals[k]=mstd(fin.map(f)));
+    return {arm:a,n:rs.length,done:fin.length,running:rs.filter(d=>String(d.status).startsWith("running")),vals,runs:fin,base:rs.some(d=>d.config.baseline||d.arm==="text_baseline"),fam:famOf(rs[0])};});
+  const rows=allRows.filter(r=>!FAM||r.fam===FAM||(r.arm==="text_baseline"||r.arm.endsWith("__text_baseline")));
+  rows.sort((a,b)=>(b.vals.test[0]??-1)-(a.vals.test[0]??-1));
+  const ref=rows.find(r=>r.arm==="reference"||r.arm==="BENCH__reference"),bl=rows.find(r=>r.arm==="text_baseline"||r.arm.endsWith("__text_baseline"))||rows.find(r=>r.base);
+  const seeds=Math.max(...rows.map(r=>r.done));
+  $("bench-meta").textContent=`${rows.length} arms · ${runs.length} runs · ${runs.filter(d=>String(d.status).startsWith("done")).length} finished`;
+  // headline
+  const done=rows.filter(r=>r.vals.test[0]!=null),best=done.filter(r=>!r.base)[0],h=[];
+  if(best){h.push(["good",`Best model: <strong>${esc(best.arm)}</strong> at ${bfmt(best.vals.test[0],"x")} chance on test`+(ref&&best!==ref&&ref.vals.test[0]!=null?` (reference ${bfmt(ref.vals.test[0],"x")}, ${(best.vals.test[0]-ref.vals.test[0]>=0?"+":"")}${(best.vals.test[0]-ref.vals.test[0]).toFixed(2)}×)`:"")+"."]);}
+  if(bl&&bl.vals.test[0]!=null){const beat=done.filter(r=>!r.base&&r.vals.test[0]>bl.vals.test[0]).map(r=>r.arm);
+    h.push([beat.length?"good":"bad",`No-training text baseline: ${bfmt(bl.vals.test[0],"x")}. `+(beat.length?`Beating it: ${beat.map(esc).join(", ")}.`:"No trained model beats it yet: the training adds nothing over the frozen text embeddings on this data.")]);}
+  if(seeds<2)h.push(["warn","One seed per arm: differences of a few tenths of × chance can be noise. Use SEEDS = [0, 1, 2] or more before drawing conclusions."]);
+  const pool=mstd(runs.filter(d=>(d.final||{}).retrieval_balanced).map(d=>d.final.retrieval_balanced.mean_pool))[0];
+  if(pool&&pool<60)h.push(["warn",`Small test split: candidate pools average ${Math.round(pool)} KUs instead of ~101, so scores saturate (finding the right KU every time is only ~${(1/_ch(pool)).toFixed(1)}× chance). Use 5,000+ papers.`]);
+  const run=rows.flatMap(r=>r.running);if(run.length)h.push(["info",`Still running: ${run.map(d=>esc(d.name)).join(", ")}.`]);
+  $("bench-head").innerHTML=h.map(([l,t])=>`<div class="find ${l}"><span class="i">${ICON[l]}</span><div>${t}</div></div>`).join("")||'<div class="muted">Waiting for the first finished run…</div>';
+  // leaderboard 1: reasoning
+  const rrows=rows.slice().sort((a,b)=>(b.vals.rindex[0]??-1)-(a.vals.rindex[0]??-1)),rbest={};
+  RCOLS.forEach(([k,,,,dir])=>{const v=rrows.map(r=>r.vals[k][0]).filter(x=>x!=null&&!isNaN(x));rbest[k]=v.length?Math.max(...v):null;});
+  const cellBg=(k,m)=>{if(m==null)return "";if(["forward","inverse","abduction","inv_m","inv_p","abd_c","abd_q","rindex"].includes(k))return ratioBg(m);if(k==="fwd_mp"||k==="abd_mp"||k==="inv_mp"||k==="inv_sub")return m>=0.7?"rgba(22,163,74,.3)":m>=0.58?"rgba(217,119,6,.25)":"rgba(220,38,38,.15)";
+    if(k==="consistency")return m>=0.65?"rgba(22,163,74,.3)":m>=0.55?"rgba(217,119,6,.25)":"rgba(220,38,38,.15)";return "";};
+  $("bench-reason").innerHTML=`<tr><th>#</th><th>arm</th>${RCOLS.map(([k,l])=>`<th class="num" style="${l.startsWith("·")?"font-weight:400":""}">${l}</th>`).join("")}<th class="num">index vs baseline</th></tr>`+rrows.map((r,i)=>{
+    const bi=bl&&bl.vals.rindex[0]!=null&&r.vals.rindex[0]!=null&&!r.base?r.vals.rindex[0]-bl.vals.rindex[0]:null;
+    return `<tr style="${r.base?"font-style:italic":""}"><td class="num">${i+1}</td><td><b>${armName(r.arm)}</b> ${famPill(r.fam)}</td>`+
+      RCOLS.map(([k,,,kind])=>{const [m,sd]=r.vals[k];const top=m!=null&&rbest[k]!=null&&Math.abs(m-rbest[k])<1e-9&&rrows.length>1;
+        return `<td class="num" style="${cellBg(k,m)?"background:"+cellBg(k,m):""};${top?"font-weight:700;outline:2px solid var(--good);outline-offset:-2px":""}">${bfmt(m,kind)}${sd!=null?`<span class="muted"> ±${kind==="%"?pct(sd):sd.toFixed(2)}</span>`:""}</td>`;}).join("")+
+      `<td class="num ${bi==null?"":bi>0.05?"ok":bi<-0.05?"no":""}">${bi==null?"–":(bi>=0?"+":"")+bi.toFixed(2)+"×"}</td></tr>`;}).join("");
+  const rb=rrows.filter(r=>!r.base&&r.vals.rindex[0]!=null)[0],rh=[];
+  if(rb){const names={forward:"forward prediction",inverse:"experiment design",abduction:"abduction",consistency:"consistency",iv:"intervention"};
+    const solvedBy=k=>rrows.filter(r=>!r.base&&r.runs.some(d=>{const T=TK(d);return k==="iv"?((T.intervention||{}).condition||{}).rel_shift>=0.3&&((T.intervention||{}).condition||{}).toward_donor>=0.6:k==="consistency"?(T.consistency||{}).bal_acc>=0.65:(T[k]||{}).ratio>=1.5;})).map(r=>r.arm);
+    rh.push(["good",`Best reasoner: <strong>${esc(rb.arm)}</strong>, reasoning index ${bfmt(rb.vals.rindex[0],"x")}, ${bfmt(rb.vals.rsolved[0],"n")} of 5 tasks solved.`]);
+    const per=Object.keys(names).map(k=>{const s=solvedBy(k);return `${names[k]}: ${s.length?s.map(esc).join(", "):"no model"}`;});
+    rh.push(["info","Solved by: "+per.join(" · ")+"."]);
+    if(bl&&bl.vals.rindex[0]!=null){const beat=rrows.filter(r=>!r.base&&r.vals.rindex[0]>bl.vals.rindex[0]).map(r=>r.arm);
+      rh.push([beat.length?"good":"bad",`Text baseline reasoning index ${bfmt(bl.vals.rindex[0],"x")}. `+(beat.length?`Above it: ${beat.map(esc).join(", ")}.`:"No trained model reasons better than plain text similarity yet.")+
+        ` Note: the baseline's intervention score comes from text similarity alone, so "toward the new result" only counts when a model beats it.`]);}
+    const famBest=Object.keys(FAMILY).map(f=>{const r=allRows.filter(x=>x.fam===f&&x.vals.rindex[0]!=null).sort((a,b)=>b.vals.rindex[0]-a.vals.rindex[0])[0];return r?`${FAMILY[f]}: <strong>${armName(r.arm)}</strong> ${bfmt(r.vals.rindex[0],"x")}`:null;}).filter(Boolean);
+    if(famBest.length>1)rh.push(["info","Best per family (reasoning index): "+famBest.join(" · ")+"."]);
+    const bases=rrows.filter(r=>r.base&&r.vals.rindex[0]!=null);
+    if(bases.length>1){const sb=bases[0],above=rrows.filter(r=>!r.base&&r.vals.rindex[0]>sb.vals.rindex[0]).map(r=>r.arm);
+      rh.push([above.length?"good":"bad",`Strongest comparison system: <strong>${esc(sb.arm)}</strong> (reasoning index ${bfmt(sb.vals.rindex[0],"x")}). `+(above.length?`JEPA models above it: ${above.map(esc).join(", ")}.`:"No JEPA model is above it yet.")]);}}
+  const best1=k=>{const v=rrows.map(r=>r.vals[k][0]).filter(x=>x!=null&&!isNaN(x));return v.length?Math.max(...v):null;};
+  const strong=r=>["forward","inverse","abduction","consistency","iv_shift"].filter(k=>{const m=r.vals[k][0],b=best1(k);return m!=null&&b!=null&&m>=b-1e-9;});
+  const MN={forward:"forward",inverse:"experiment design",abduction:"abduction",consistency:"consistency",iv_shift:"intervention"};
+  $("bench-methods").innerHTML=`<tr><th>#</th><th>method</th><th>family</th><th>from</th><th>how it works (what it changes)</th><th class="num">reasoning index</th><th class="num">retrieval</th><th class="num">best epoch</th><th>best at</th></tr>`+
+    rrows.map((r,i)=>{const d=r.runs[0]||runs.find(x=>x.arm===r.arm)||{};const k=r.arm.indexOf("__");const st=strong(r);
+      return `<tr><td class="num">${i+1}</td><td><b>${esc(k<0?r.arm:r.arm.slice(k+2))}</b></td><td>${famPill(r.fam)}</td><td class="muted">${esc(k<0?E:r.arm.slice(0,k))}</td>`+
+        `<td style="white-space:normal;min-width:320px">${esc(d.about||"")}</td><td class="num" style="background:${ratioBg(r.vals.rindex[0])}">${bfmt(r.vals.rindex[0],"x")}</td>`+
+        `<td class="num">${bfmt(r.vals.test[0],"x")}</td><td class="num">${bfmt(r.vals.best_ep[0],"n")}</td><td>${st.length?st.map(x=>MN[x]).join(", "):"<span class=muted>–</span>"}</td></tr>`;}).join("");
+  j(`findings_${E}.json`).then(F=>{if(!F||!F.hypotheses)return;const oc=o=>{const c=String(o||"");return `<b class="${c.startsWith("SUPP")||c==="PASSED"?"ok":c.startsWith("CONTR")||c.startsWith("NOT SUPP")||c==="FAILED"?"no":""}">${esc(c)}</b>`;};
+    const rowsF=F.hypotheses.map(h=>`<tr><td><b>${esc(h.id)}</b></td><td style="white-space:normal">${esc(h.claim)}</td><td>${esc(h.a||"–")} vs ${esc(h.b||"–")}</td><td class="num">${h.difference==null?"–":(h.difference>=0?"+":"")+h.difference.toFixed(2)}</td><td class="num">${h.ci95&&h.ci95[0]!=null?h.ci95[0].toFixed(2)+" .. "+h.ci95[1].toFixed(2):"–"}</td><td>${oc(h.outcome)}</td></tr>`).join("");
+    const C=F.contamination||{};
+    $("bench-findings").className="";
+    $("bench-findings").innerHTML=`<div style="overflow-x:auto"><table><tr><th></th><th>hypothesis</th><th>compared</th><th class="num">difference</th><th class="num">95% CI</th><th>outcome</th></tr>${rowsF}`+
+      `<tr><td><b>C</b></td><td style="white-space:normal">${esc(C.claim||"contamination check")}</td><td>${esc((C.largest_drop||{}).system||"–")}</td><td class="num">${(C.largest_drop||{}).drop_x_chance==null?"–":C.largest_drop.drop_x_chance.toFixed(2)}</td><td></td><td>${oc(C.outcome)}</td></tr></table></div>`+
+      `<div class="find info" style="margin-top:8px"><span class="i">${ICON.info}</span><div><b>Conclusion.</b> ${esc(F.conclusion||"")}</div></div>`;}).catch(()=>{});
+  $("bench-rhead").innerHTML=rh.map(([l,t])=>`<div class="find ${l}"><span class="i">${ICON[l]}</span><div>${t}</div></div>`).join("");
+  // leaderboard 2: retrieval and model health
+  const bestOf={};BCOLS.forEach(([k,,,,dir])=>{const v=rows.filter(r=>!r.base||["test","forward","inverse","abduction","types"].includes(k)).map(r=>r.vals[k][0]).filter(x=>x!=null&&!isNaN(x));bestOf[k]=v.length?(dir>0?Math.max(...v):Math.min(...v)):null;});
+  $("bench-table").innerHTML=`<tr><th>#</th><th>arm</th><th class="num">runs</th>${BCOLS.map(([k,l])=>`<th class="num">${l}</th>`).join("")}<th class="num">vs reference</th><th>beats text baseline</th></tr>`+rows.map((r,i)=>{
+    const t=r.vals.test[0],d=ref&&ref.vals.test[0]!=null&&t!=null&&r!==ref?t-ref.vals.test[0]:null;
+    return `<tr style="${r.base?"font-style:italic":""}"><td class="num">${i+1}</td><td><b>${armName(r.arm)}</b> ${famPill(r.fam)}</td><td class="num">${r.done}/${r.n}</td>`+
+      BCOLS.map(([k,,,kind])=>{const [m,sd]=r.vals[k];const hi=m!=null&&bestOf[k]!=null&&Math.abs(m-bestOf[k])<1e-9&&rows.length>1;
+        return `<td class="num" style="${hi?"background:rgba(22,163,74,.28)":""}">${bfmt(m,kind)}${sd!=null?`<span class="muted"> ±${kind==="%"?pct(sd):sd.toFixed(2)}</span>`:""}</td>`;}).join("")+
+      `<td class="num ${d==null?"":d>0.05?"ok":d<-0.05?"no":""}">${d==null?"–":(d>=0?"+":"")+d.toFixed(2)+"×"}</td><td>${r.base?"–":bl&&bl.vals.test[0]!=null&&t!=null?(t>bl.vals.test[0]?'<span class="ok">yes</span>':'<span class="no">no</span>'):"–"}</td></tr>`;}).join("");
+  // per-type table
+  const T=["context","question","method","procedure","result","interpretation","limitation","claim","evidence","implication"];
+  $("bench-types").innerHTML=`<tr><th>arm</th>${T.map(t=>`<th class="num" style="color:${TYPE_COL[t]}">${t}</th>`).join("")}</tr>`+rows.map(r=>`<tr><td>${esc(r.arm)}</td>${T.map(t=>{
+    const [m]=mstd(r.runs.map(d=>{const v=((d.final||{}).per_type||{})[t];return v?v.MRR_bal/(v.chance_bal||1):null;}));
+    return m==null?'<td class="num muted">·</td>':`<td class="num" style="background:${ratioBg(m)}">${m.toFixed(2)}×</td>`;}).join("")}</tr>`).join("");
+  // charts
+  const g="g-bench",L=rows.map(r=>r.arm);
+  card(g,"bTest","Test MRR ÷ chance per arm","bar = mean over seeds, dots = single seeds",300);
+  card(g,"bTasks","Reasoning tasks per arm","× chance (consistency and intervention: ÷ 0.5); dashed line = chance",300);
+  card(g,"bRadar","Reasoning profile","each axis one task on the × chance scale; 1 = chance",340);
+  card(g,"bRcurve","Reasoning index per epoch","validation, end of every epoch (mean over seeds)",300);
+  card(g,"bCurve","Learning curves","validation MRR ÷ chance at every epoch end (mean over seeds)",300);
+  card(g,"bWorld","Structure and world model","accuracy from typed edges (× chance) and action prediction (direction cos)",300);
+  const maxS=Math.max(0,...rows.map(r=>r.runs.length));
+  bar("bTest",L,[{label:"mean",data:rows.map(r=>r.vals.test[0]),backgroundColor:rows.map(r=>r.fam==="comparison"?css("--chance"):r.fam==="gnn"?"#7c3aed":PAL[0])}].concat(
+    Array.from({length:maxS},(_,i)=>({type:"line",label:`seed run ${i+1}`,data:rows.map(r=>{const d=r.runs[i];const f=d&&(d.final||{}).retrieval_balanced;return f?f.MRR/(f.chance_MRR||1):null;}),showLine:false,pointRadius:4,pointBackgroundColor:css("--text"),borderColor:css("--text")}))));
+  const RK=[["forward","Forward",PAL[0],1],["inverse","Experiment design",PAL[1],1],["abduction","Abduction",PAL[2],1],["consistency","Consistency",PAL[3],0.5],["iv_toward","Intervention",PAL[4],0.5]];
+  bar("bTasks",L,RK.map(([k,l,c,dv])=>({label:l,data:rows.map(r=>{const v=r.vals[k][0];return v==null?null:v/dv;}),backgroundColor:c}))
+    .concat([{type:"line",label:"chance",data:L.map(()=>1),borderColor:css("--chance"),borderDash:[6,4],pointRadius:0,borderWidth:1.5}]));
+  if($("c-bRadar")){const txt=css("--muted"),grid=css("--line");
+    const ds=rows.map((r,i)=>({label:r.arm,data:RK.map(([k,,,dv])=>{const v=r.vals[k][0];return v==null?0:v/dv;}),borderColor:r.base?css("--chance"):PAL[i%PAL.length],
+      backgroundColor:"transparent",borderDash:r.base?[6,4]:[],pointRadius:2,borderWidth:2}));
+    if(charts.bRadar){charts.bRadar.data.datasets=ds;charts.bRadar.update("none");}
+    else charts.bRadar=new Chart($("c-bRadar"),{type:"radar",data:{labels:RK.map(x=>x[1]),datasets:ds},options:{animation:false,responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:txt,boxWidth:12,font:{size:11}}}},scales:{r:{beginAtZero:true,grid:{color:grid},angleLines:{color:grid},pointLabels:{color:txt},ticks:{color:txt,backdropColor:"transparent"}}}}});}
+  const ridx=t=>{if(!t||t.note)return null;const v=[t.forward?.ratio,t.inverse?.ratio,t.abduction?.ratio,t.consistency?.bal_acc!=null?t.consistency.bal_acc/0.5:null,
+    t.intervention?.condition?.toward_donor!=null?t.intervention.condition.toward_donor/0.5:null].filter(x=>x!=null&&!isNaN(x));return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;};
+  const rcurve=r=>{const ep={};r.runs.forEach(d=>(d.epoch_results||[]).forEach(e=>{const v=ridx(e.tasks);if(v!=null)(ep[e.epoch]=ep[e.epoch]||[]).push(v);}));
+    return Object.keys(ep).map(Number).sort((a,b)=>a-b).map(e=>({x:e,y:ep[e].reduce((p,c)=>p+c,0)/ep[e].length}));};
+  const xs2=$("xaxis").value;$("xaxis").value="epoch";
+  line("bRcurve",rows.filter(r=>!r.base).map((r,i)=>({label:r.arm,data:rcurve(r),borderColor:PAL[i%PAL.length],backgroundColor:PAL[i%PAL.length],pointRadius:3,borderWidth:2}))
+    .concat(bl&&bl.vals.rindex[0]!=null?[{label:"text baseline (test)",data:[{x:1,y:bl.vals.rindex[0]},{x:Math.max(1,...rows.flatMap(r=>rcurve(r).map(p=>p.x))),y:bl.vals.rindex[0]}],borderColor:css("--chance"),borderDash:[6,4],pointRadius:0}]:[]),{ymin:0});
+  $("xaxis").value=xs2;
+  const curve=r=>{const ep={};r.runs.forEach(d=>(d.epoch_results||[]).forEach(e=>{(ep[e.epoch]=ep[e.epoch]||[]).push(e.bal_MRR/(e.bal_chance||1));}));
+    return Object.keys(ep).map(Number).sort((a,b)=>a-b).map(e=>({x:e,y:ep[e].reduce((p,c)=>p+c,0)/ep[e].length}));};
+  const xs=$("xaxis").value;$("xaxis").value="epoch";
+  line("bCurve",rows.filter(r=>!r.base).map((r,i)=>({label:r.arm,data:curve(r),borderColor:PAL[i%PAL.length],backgroundColor:PAL[i%PAL.length],pointRadius:3,borderWidth:2}))
+    .concat(bl&&bl.vals.test[0]!=null?[{label:"text baseline (test)",data:[{x:1,y:bl.vals.test[0]},{x:Math.max(1,...rows.flatMap(r=>curve(r).map(p=>p.x))),y:bl.vals.test[0]}],borderColor:css("--chance"),borderDash:[6,4],pointRadius:0}]:[]),{ymin:0});
+  $("xaxis").value=xs;
+  bar("bWorld",L,[{label:"from structure (×)",data:rows.map(r=>r.vals.structure[0]),backgroundColor:PAL[4]},{label:"action: swap (cos)",data:rows.map(r=>r.vals.swap[0]),backgroundColor:PAL[2]},{label:"action: flip (cos)",data:rows.map(r=>r.vals.flip[0]),backgroundColor:PAL[3]}]);
+}
+const _ch=n=>{let s=0;for(let k=1;k<=Math.round(n);k++)s+=1/k;return s/Math.round(n);};
+
+// ---------------------------------------------------------------- compare two runs
+const MODE_NAME={section:"KUs (sections)",paper:"one KU per paper",paper_masked:"paper as one text","graph-jepa":"Graph-JEPA"};
+let cmpInit=false;
+function cmpPick(){   // default pair: newest experiment whose arms differ in ku_mode, else the two newest runs
+  const names=RUNS.map(r=>r.name),D=names.map(n=>ALL[`runs/${n}/live.json`]).filter(Boolean);
+  for(let i=D.length-1;i>=0;i--){const d=D[i];if(!d.experiment||d.experiment==="single")continue;
+    const mates=D.filter(o=>o.experiment===d.experiment&&o.seed===d.seed&&o.config.ku_mode!==d.config.ku_mode);
+    if(mates.length){const a=d.config.ku_mode==="section"?d:mates.find(o=>o.config.ku_mode==="section")||mates[0],b=a===d?mates[0]:d;return [a.name,b.name];}}
+  return names.length>1?[names[names.length-2],names[names.length-1]]:[names[0],names[0]];
+}
+function cmpVals(d,useTest){   // -> {key:{label,v,txt,kind,group}}
+  const F=d.final||{},R=d.epoch_results||[],last=R[R.length-1]||null,E=d.evals||[],e=E[E.length-1]||{},H=d.history||[],h=H[H.length-1]||{};
+  const done=!!(F.retrieval_balanced),T=useTest&&F.tasks&&!F.tasks.note?F.tasks:(last&&last.tasks&&!last.tasks.note?last.tasks:null);
+  const out={},put=(k,label,v,kind,group,txt)=>out[k]={label,v,kind,group,txt:txt??(v==null?"–":kind==="x"?v.toFixed(2)+"×":kind==="%"?pct(v):kind==="s"?fmt(v,0)+" s":fmt(v,4))};
+  const vr=last?last.bal_MRR/(last.bal_chance||1):(e.bal_MRR!=null?e.bal_MRR/(e.bal_chance||1):null);
+  put("val","Validation MRR ×chance"+(last?` (epoch ${last.epoch})`:""),vr,"x","Overall");
+  if(useTest&&done)put("test","Test MRR ×chance",F.retrieval_balanced.MRR/(F.retrieval_balanced.chance_MRR||1),"x","Overall");
+  if(last)put("learned","KU types learned (≥1.5× chance)",last.types_learned/Math.max(1,Object.keys(last.per_type).length),"%","Overall",`${last.types_learned}/${Object.keys(last.per_type).length}`);
+  if(T){for(const k of ["forward","inverse","abduction"])if(T[k]&&T[k].ratio!=null)put("t_"+k,TASK_NAME[k],T[k].ratio,"x","Reasoning tasks");
+    if(T.consistency&&T.consistency.bal_acc!=null)put("t_consistency",TASK_NAME.consistency+" (balanced acc.)",T.consistency.bal_acc,"%","Reasoning tasks");
+    const c=(T.intervention||{}).condition||{};
+    if(c.toward_donor!=null)put("t_toward","Intervention: prediction moves toward the new result",c.toward_donor,"%","Reasoning tasks");
+    if(c.rel_shift!=null)put("t_shift","Intervention: how much the prediction reacts (rel. shift)",c.rel_shift,"n","Reasoning tasks",fmt(c.rel_shift,3));}
+  const PT=useTest&&F.per_type?Object.fromEntries(Object.entries(F.per_type).map(([t,v])=>[t,v.MRR_bal/(v.chance_bal||1)])):
+    (last?Object.fromEntries(Object.entries(last.per_type).map(([t,v])=>[t,v.MRR/(v.chance||1)])):{});
+  for(const t of ["context","question","method","procedure","result","interpretation","limitation","claim","evidence","implication","paper"])if(PT[t]!=null)put("ty_"+t,t,PT[t],"x","Per masked KU type");
+  put("loss","Train JEPA loss (lower = closer fit)",h.jepa,"lo","Training");
+  const nl=(d.neuron_timeline||[]).slice(-1)[0];
+  if(nl){const L=nl.layers[nl.layers.length-1];if(d.config.ku_mode!=="paper")put("idn","Paper-identity neurons (lower = less shortcut)",L.counts.identity/ncount(L),"%lo","Training");
+    put("pl","Predictor dims that learned the target",nl.pred_learned/(nl.pred_n||1),"%","Training",`${nl.pred_learned}/${nl.pred_n}`);}
+  put("time","Training time",h.sec,"s","Training");
+  return out;
+}
+function cmpWinner(a,b,kind){
+  if(a==null||b==null)return 0;const lower=kind==="lo"||kind==="%lo"||kind==="s";
+  const thr=kind==="x"?0.05:(kind==="%"||kind==="%lo")?0.02:kind==="n"?0.02:0.05*Math.max(Math.abs(a),Math.abs(b),1e-9);
+  const d=b-a;if(Math.abs(d)<thr)return 0;return (lower?-d:d)>0?1:-1;   // 1 = B better, -1 = A better
+}
+async function compareTab(force){
+  const now=Date.now();if(!force&&now-lastRunsFetch<4000&&cmpInit)return;lastRunsFetch=now;
+  try{RUNS=await j("runs.json");}catch(e){return;}
+  const got=await Promise.all(RUNS.map(r=>j(r.path).catch(()=>null)));got.forEach((d,i)=>{if(d)ALL[RUNS[i].path]=d;});
+  const opts=RUNS.slice().reverse().map(r=>`<option value="${esc(r.name)}">${esc(r.name)}</option>`).join("");
+  for(const id of ["cmpA","cmpB"])if($(id).dataset.o!==opts){const v=$(id).value;$(id).innerHTML=opts;$(id).dataset.o=opts;if(v)$(id).value=v;}
+  if(!cmpInit&&RUNS.length){const [a,b]=cmpPick();$("cmpA").value=a;$("cmpB").value=b;cmpInit=true;
+    $("cmpA").onchange=$("cmpB").onchange=$("cmpSrc").onchange=()=>{resetCharts();compareTab(true);};
+    $("cmpSwap").onclick=()=>{const a=$("cmpA").value;$("cmpA").value=$("cmpB").value;$("cmpB").value=a;resetCharts();compareTab(true);};}
+  const A=ALL[`runs/${$("cmpA").value}/live.json`],B=ALL[`runs/${$("cmpB").value}/live.json`];
+  if(!A||!B){$("cmp-head").innerHTML='<div class="empty">Need at least one run.</div>';return;}
+  const useTest=$("cmpSrc").value==="best"&&(A.final||{}).retrieval_balanced&&(B.final||{}).retrieval_balanced;
+  const VA=cmpVals(A,useTest),VB=cmpVals(B,useTest),keys=[...new Set([...Object.keys(VA),...Object.keys(VB)])];
+  const nm=d=>`${d.name} <span class="muted">(${MODE_NAME[d.config.ku_mode]||d.config.ku_mode}${d.status&&!String(d.status).startsWith("done")?", "+String(d.status).split(":")[0]:""})</span>`;
+  // headline in plain words
+  const tk=keys.filter(k=>k.startsWith("t_")&&k!=="t_shift"),winsB=[],winsA=[];
+  for(const k of tk){const w=cmpWinner(VA[k]&&VA[k].v,VB[k]&&VB[k].v,(VA[k]||VB[k]).kind);if(w>0)winsB.push((VB[k]||VA[k]).label);else if(w<0)winsA.push((VA[k]||VB[k]).label);}
+  const ov=cmpWinner(VA.val&&VA.val.v,VB.val&&VB.val.v,"x"),la=A.config.ku_mode===B.config.ku_mode?"A":MODE_NAME[A.config.ku_mode],lb=A.config.ku_mode===B.config.ku_mode?"B":MODE_NAME[B.config.ku_mode];
+  let head=`<div class="find info"><span class="i">ℹ️</span><div><b>A = ${nm(A)} · B = ${nm(B)}</b>Numbers from ${useTest?"the test split (both runs finished)":"the latest end-of-epoch validation"}.</div></div>`;
+  head+=`<div class="find ${ov===0?"info":"good"}"><span class="i">${ov===0?"🤝":"🏆"}</span><div><b>Overall: ${ov>0?lb+" is better":ov<0?la+" is better":"about the same"}</b>Validation MRR ${VA.val&&VA.val.txt} (A) vs ${VB.val&&VB.val.txt} (B), where 1× = guessing.</div></div>`;
+  if(tk.length)head+=`<div class="find info"><span class="i">🧠</span><div><b>Reasoning tasks</b>${winsB.length?`<b style="display:inline">${lb}</b> is better at: ${winsB.join(", ")}. `:""}${winsA.length?`<b style="display:inline">${la}</b> is better at: ${winsA.join(", ")}. `:""}${!winsA.length&&!winsB.length?"No clear difference on any task.":""}${tk.length-winsA.length-winsB.length>0&&(winsA.length||winsB.length)?` About the same on ${tk.length-winsA.length-winsB.length} other task(s).`:""}</div></div>`;
+  else head+=`<div class="find info"><span class="i">⏳</span><div><b>Reasoning tasks</b>Appear after the first epoch (and are not defined for one-KU-per-paper runs).</div></div>`;
+  $("cmp-head").innerHTML=head;
+  // table
+  let html=`<tr><th>metric</th><th class="num">A</th><th class="num">B</th><th class="num">B − A</th><th>better</th></tr>`,grp="";
+  for(const k of keys){const a=VA[k],b=VB[k],r=a||b;if(r.group!==grp){grp=r.group;html+=`<tr><td colspan="5" style="background:var(--soft);font-weight:650">${grp}</td></tr>`;}
+    const w=cmpWinner(a&&a.v,b&&b.v,r.kind),d=a&&b&&a.v!=null&&b.v!=null?b.v-a.v:null;
+    const dt=d==null?"–":(r.kind==="x"?(d>=0?"+":"")+d.toFixed(2)+"×":r.kind.startsWith("%")?(d>=0?"+":"")+(100*d).toFixed(0)+" pts":(d>=0?"+":"")+fmt(d,r.kind==="s"?0:3));
+    const g="rgba(22,163,74,.28)";
+    html+=`<tr><td>${esc(r.label)}</td><td class="num" style="${w<0?"background:"+g:""}">${a?a.txt:"–"}</td><td class="num" style="${w>0?"background:"+g:""}">${b?b.txt:"–"}</td><td class="num">${dt}</td><td>${w>0?'<span class="pill" style="background:var(--good)">B</span>':w<0?'<span class="pill" style="background:var(--good)">A</span>':'<span class="muted">same</span>'}</td></tr>`;}
+  $("cmp-table").innerHTML=html;
+  // charts
+  const g="g-cmp",ca=PAL[0],cb=PAL[3];
+  card(g,"cmptask","Reasoning tasks: A vs B","all on one scale: ×chance (retrieval: MRR ÷ chance; consistency: balanced acc. ÷ 0.5; intervention: share toward the new result ÷ 0.5). Dashed line = chance.",300);
+  card(g,"cmptype","Each masked KU type: A vs B","MRR ÷ chance per KU type",300);
+  card(g,"cmpep","Learning curve: A vs B","validation MRR ÷ chance at the end of every epoch",300);
+  card(g,"cmptep","Reasoning tasks per epoch: A (solid) vs B (dashed)","×chance at the end of every epoch",300);
+  const scale=(V,k)=>!V[k]?null:k==="t_consistency"||k==="t_toward"?V[k].v/0.5:V[k].v;
+  const tkeys=["t_forward","t_inverse","t_abduction","t_consistency","t_toward"].filter(k=>VA[k]||VB[k]);
+  const tl={t_forward:"Forward",t_inverse:"Inverse design",t_abduction:"Abduction",t_consistency:"Consistency",t_toward:"Intervention"};
+  bar("cmptask",tkeys.map(k=>tl[k]),[{label:"A",data:tkeys.map(k=>scale(VA,k)),backgroundColor:ca},{label:"B",data:tkeys.map(k=>scale(VB,k)),backgroundColor:cb}]);
+  const ty=keys.filter(k=>k.startsWith("ty_"));
+  bar("cmptype",ty.map(k=>k.slice(3)),[{label:"A",data:ty.map(k=>VA[k]?VA[k].v:null),backgroundColor:ca},{label:"B",data:ty.map(k=>VB[k]?VB[k].v:null),backgroundColor:cb}]);
+  const ep=(d,col,dash)=>({label:d===A?"A":"B",data:(d.epoch_results||[]).map(r=>({x:r.epoch,y:r.bal_MRR/(r.bal_chance||1)})),borderColor:col,backgroundColor:col,pointRadius:4,borderWidth:2.5,borderDash:dash});
+  const one=[...(A.epoch_results||[]),...(B.epoch_results||[])].map(r=>r.epoch);
+  const chanceLine=one.length?[{label:"· chance",data:[{x:Math.min(...one),y:1},{x:Math.max(...one),y:1}],borderColor:css("--chance"),borderDash:[6,4],pointRadius:0}]:[];
+  const xsave=$("xaxis").value;$("xaxis").value="epoch";
+  line("cmpep",[ep(A,ca,[]),ep(B,cb,[6,4])].concat(chanceLine),{ymin:0});
+  const tser=(d,k,col,dash,lab)=>({label:lab,data:(d.epoch_results||[]).filter(r=>r.tasks&&r.tasks[k]&&r.tasks[k].ratio!=null).map(r=>({x:r.epoch,y:r.tasks[k].ratio})),borderColor:col,backgroundColor:col,pointRadius:3,borderWidth:2,borderDash:dash});
+  line("cmptep",["forward","inverse","abduction"].flatMap((k,i)=>[tser(A,k,PAL[i],[],`A ${tl["t_"+k]}`),tser(B,k,PAL[i],[6,4],`B ${tl["t_"+k]}`)]).concat(chanceLine),{ymin:0});
+  $("xaxis").value=xsave;
+}
+
+// ---------------------------------------------------------------- polling
+function selectRun(path){if(path===RUN)return;RUN=path;$("run").value=path;$("ex-type").innerHTML="";resetCharts();DATA=null;poll(true);}
+$("run").onchange=()=>{$("follow").checked=false;selectRun($("run").value);};
+async function refreshRuns(){
+  try{RUNS=await j("runs.json");}catch(e){return;}
+  const sel=$("run"),opts=RUNS.slice().reverse();
+  const html=opts.map(r=>`<option value="${r.path}">${esc(r.name)}</option>`).join("");if(sel.innerHTML!==html)sel.innerHTML=html;
+  const want=(new URLSearchParams(location.search).get("run")||"").replace(/ /g,"+")||null;   // "+" in run names
+  let target=RUN;
+  if(!RUN&&want)target=`runs/${want}/live.json`;
+  if($("follow").checked&&opts.length)target=opts[0].path;              // newest run = the one training now
+  if(!target&&opts.length)target=opts[0].path;
+  if(target&&target!==RUN){RUN=target;resetCharts();$("ex-type").innerHTML="";}
+  sel.value=RUN;
+}
+async function poll(force){
+  if(!force&&!$("live").checked)return;
+  await refreshRuns();if(!RUN){$("stepinfo").textContent="waiting for a run…";return;}
+  try{DATA=await j(RUN);render();}catch(e){}
+  if(tab==="runs")runsTab(false);
+  if(tab==="compare")compareTab(false);
+  if(tab==="bench")benchTab(false);
+}
+if(new URLSearchParams(location.search).get("run"))$("follow").checked=false;
+showTab();poll(true);setInterval(()=>poll(false),2000);
+</script></body></html>

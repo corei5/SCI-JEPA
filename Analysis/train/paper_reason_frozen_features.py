@@ -45,11 +45,11 @@ import torch_geometric.transforms as T
 from sklearn.metrics import roc_auc_score, average_precision_score
 
 from core.data_utils.paper_graph import build_hetero_graph, ASPECTS
+from core.paths import papers_layout
 
-
-# ─────────────────────────────────────────────────────────────
-RAW_DIR    = "/nfs/home/rabbyg/JEPA/Graph-JEPA/dataset/papers/raw"
-CACHE_PATH = "/nfs/home/rabbyg/JEPA/Graph-JEPA/dataset/papers/processed/hetero_graphA.pt"
+_PATHS = papers_layout()
+RAW_DIR    = _PATHS["raw"]
+CACHE_PATH = _PATHS["hetero"]
 DEVICE     = "cuda" if torch.cuda.is_available() else "cpu"
 HIDDEN     = 128
 EPOCHS     = 100
@@ -57,7 +57,7 @@ LR         = 1e-3
 SEEDS      = [0, 1, 2, 3, 4]
 MASK_FRAC  = 0.10          # fraction of has_<aspect> edges held out for eval
 
-CKPT_DIR   = "/nfs/home/rabbyg/JEPA/Graph-JEPA/checkpoints/reasoning"
+CKPT_DIR   = _PATHS["ckpt"]
 CKPT_PATH  = os.path.join(CKPT_DIR, "claim_reasoner_best.pt")
 
 # aspect -> (relation, reverse relation) as created by paper_graph + ToUndirected

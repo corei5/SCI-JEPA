@@ -1,0 +1,54 @@
+{
+  "_note": "PLACEHOLDER vocabulary built from slots computable from the normalized KUs. Replace with the ORKG-derived spec in the same format. Not Theorem A2 evidence. Context-determined constraints (field, paper type, a result's count of visible claims) and validity constraints (datatype, cardinality) are included on purpose: Theorem A2 says they cannot separate the degenerate branch.",
+  "shapes": [
+    {
+      "name": "ClaimShape",
+      "target_type": "claim",
+      "slots": [
+        {"name": "challenged", "kind": "class", "n_classes": 2,
+         "_def": "the claim has real contradicting evidence (null statements like 'The paper does not present any contradicting evidence.' do not count)"},
+        {"name": "evidence_cites_figure", "kind": "class", "n_classes": 2,
+         "_def": "the claim's evidence points at a figure / table / equation"},
+        {"name": "field", "kind": "class", "n_classes": "n_fields"}
+      ],
+      "constraints": [
+        {"kind": "class_range", "slot": "challenged", "allowed": "truth", "tight": true,
+         "_why": "evidence children are dropped when the claim is masked, so the context does not show it"},
+        {"kind": "class_range", "slot": "evidence_cites_figure", "allowed": "truth", "tight": true},
+        {"kind": "class_range", "slot": "field", "allowed": "truth", "context_determined": true, "tight": false},
+        {"kind": "datatype", "slot": "challenged", "tight": false}
+      ]
+    },
+    {
+      "name": "ResultShape",
+      "target_type": "result",
+      "slots": [
+        {"name": "quantitative", "kind": "class", "n_classes": 2,
+         "_def": "key_results reports numbers with units / percentages / decimals"},
+        {"name": "n_grounded_claims", "kind": "count"},
+        {"name": "paper_type", "kind": "class", "n_classes": "n_paper_types"}
+      ],
+      "constraints": [
+        {"kind": "class_range", "slot": "quantitative", "allowed": "truth", "tight": true,
+         "_caveat": "claims' supporting evidence often restates result numbers, so this may be partly context-determined; check with the nuisance audit"},
+        {"kind": "value_range", "slot": "n_grounded_claims", "range": "exact", "context_determined": true, "tight": false,
+         "_why": "the result grounds every claim of its paper and the claims stay visible: the context counts them"},
+        {"kind": "class_range", "slot": "paper_type", "allowed": "truth", "context_determined": true, "tight": false},
+        {"kind": "cardinality", "slot": "n_grounded_claims", "min": 0, "tight": false}
+      ]
+    },
+    {
+      "name": "MethodShape",
+      "target_type": "method",
+      "slots": [
+        {"name": "quantitative", "kind": "class", "n_classes": 2},
+        {"name": "field", "kind": "class", "n_classes": "n_fields"}
+      ],
+      "constraints": [
+        {"kind": "class_range", "slot": "quantitative", "allowed": "truth", "tight": true,
+         "_caveat": "the procedure KU restates the method; use mask_policy '...+siblings' to hide it"},
+        {"kind": "class_range", "slot": "field", "allowed": "truth", "context_determined": true, "tight": false}
+      ]
+    }
+  ]
+}

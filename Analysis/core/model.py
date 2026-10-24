@@ -1,3 +1,4 @@
+import contextlib
 import torch
 import torch.nn as nn
 import numpy as np
@@ -47,9 +48,14 @@ class GraphJepa(nn.Module):
                  patch_rw_dim=0,
                  num_context_patches=1,
                  num_target_patches=4,
-                 ema_momentum=0.996):
+                 ema_momentum=0.996,
+                 reuse_online_pass=True,
+                 foreach_ema=True):
 
         super().__init__()
+        self.reuse_online_pass = reuse_online_pass
+        self.foreach_ema = foreach_ema
+        self._ema_lists = None
         self.dropout = dropout
         self.use_rw = rw_dim > 0
         self.use_lap = lap_dim > 0
@@ -133,6 +139,23 @@ class GraphJepa(nn.Module):
     def update_target(self, momentum=None):
         """Call this AFTER optimizer.step() every training iteration."""
         m = self.ema_momentum if momentum is None else momentum
+        if self.foreach_ema:
+            first = next(self.target_input_encoder.parameters()).data_ptr()
+            if self._ema_lists is None or self._ema_lists[1][0].data_ptr() != first:   # built or moved
+                p_o, p_t, b_o, b_t = [], [], [], []
+                for online, target in self._online_target_pairs():
+                    p_o += [p.data for p in online.parameters()]
+                    p_t += [p.data for p in target.parameters()]
+                    b_o += [b.data for b in online.buffers()]
+                    b_t += [b.data for b in target.buffers()]
+                self._ema_lists = (p_o, p_t, b_o, b_t)
+            p_o, p_t, b_o, b_t = self._ema_lists
+            # same arithmetic as the loop below: t = t * m + o * (1 - m)
+            torch._foreach_mul_(p_t, m)
+            torch._foreach_add_(p_t, p_o, alpha=1.0 - m)
+            if b_t:
+                torch._foreach_copy_(b_t, b_o)
+            return
         for online, target in self._online_target_pairs():
             for p_o, p_t in zip(online.parameters(), target.parameters()):
                 p_t.data.mul_(m).add_(p_o.data, alpha=1.0 - m)
@@ -189,8 +212,12 @@ class GraphJepa(nn.Module):
                                   self.target_edge_encoder,
                                   self.target_patch_rw_encoder)
 
-    def _representation(self, data):
-        subgraph_x, patch_pes = self._online_backbone(data, patch_pes_reduce='mean')
+    def _representation(self, data, backbone=None):
+        """Pooled online representation. ``backbone`` is the (subgraph_x, patch_pes)
+        of an online pass already run on this batch; it is the same computation."""
+        if backbone is None:
+            backbone = self._online_backbone(data, patch_pes_reduce='mean')
+        subgraph_x, patch_pes = backbone
         subgraph_x = subgraph_x + self.patch_rw_encoder(patch_pes)
         mixer_x = subgraph_x.reshape(len(data.call_n_patches), data.call_n_patches[0][0], -1)
         n_p = mixer_x.shape[1]
@@ -199,16 +226,48 @@ class GraphJepa(nn.Module):
         out = (mixer_x * data.mask.unsqueeze(-1)).sum(1) / data.mask.sum(1, keepdim=True)
         return out
 
+    @contextlib.contextmanager
+    def _bn_counts_twice(self, on):
+        """The online backbone pass that ``_representation`` reuses used to run twice per step, so its BatchNorm
+        running statistics took two updates from the same batch. One update with momentum 1 - (1 - m)^2 gives
+        the same running mean and variance (and the count is advanced twice), so the target network, which
+        copies these buffers, stays exactly as before."""
+        if not on:
+            yield
+            return
+        norms = [mod for part in (self.input_encoder, self.edge_encoder, self.gnns, self.U)
+                 for mod in part.modules()
+                 if isinstance(mod, nn.modules.batchnorm._BatchNorm) and mod.track_running_stats
+                 and mod.momentum is not None]
+        saved = [(mod.momentum, int(mod.num_batches_tracked)) for mod in norms]
+        for mod, (m, _) in zip(norms, saved):
+            mod.momentum = 1.0 - (1.0 - m) ** 2
+        try:
+            yield
+        finally:
+            for mod, (m, count) in zip(norms, saved):
+                mod.momentum = m
+                if int(mod.num_batches_tracked) != count:      # this layer ran in the pass
+                    mod.num_batches_tracked += 1
+
+    @staticmethod
+    def _target_local_idx(data):
+        """(B, num_targets) patch index of each graph's targets, built in one copy."""
+        return torch.as_tensor(np.asarray(data.target_subgraph_idxs), dtype=torch.long)
+
     def forward(self, data, return_repr=False):
-        batch_indexer = torch.tensor(np.cumsum(data.call_n_patches))
-        batch_indexer = torch.hstack((torch.tensor(0), batch_indexer[:-1])).to(data.y.device)
+        device = data.y.device
+        n_patches = torch.as_tensor(np.asarray(data.call_n_patches).reshape(-1), device=device)
+        batch_indexer = torch.cumsum(n_patches, 0) - n_patches      # offset of each graph's first patch
         context_subgraph_idx = data.context_subgraph_idx + batch_indexer
-        target_subgraphs_idx = torch.vstack(
-            [torch.tensor(dt) for dt in data.target_subgraph_idxs]).to(data.y.device)
-        target_subgraphs_idx += batch_indexer.unsqueeze(1)
+        target_local_idx = self._target_local_idx(data)
+        target_subgraphs_idx = target_local_idx.to(device) + batch_indexer.unsqueeze(1)
 
         # ── ONLINE branch (context) — trainable ──
-        subgraph_x, patch_pes = self._online_backbone(data, patch_pes_reduce='mean')
+        reuse = return_repr and self.reuse_online_pass
+        with self._bn_counts_twice(reuse and self.training):
+            online = self._online_backbone(data, patch_pes_reduce='mean')
+        subgraph_x, patch_pes = online
         context_subgraphs = subgraph_x[context_subgraph_idx]
         context_pe = patch_pes[context_subgraph_idx]
         context_subgraphs = context_subgraphs + self.patch_rw_encoder(context_pe)
@@ -229,8 +288,7 @@ class GraphJepa(nn.Module):
 
             if hasattr(data, 'coarsen_adj') and data.coarsen_adj is not None:
                 dev = data.coarsen_adj.device
-                subgraph_incides = torch.vstack(
-                    [torch.tensor(dt) for dt in data.target_subgraph_idxs]).to(dev)
+                subgraph_incides = target_local_idx.to(dev)
                 patch_adj = data.coarsen_adj[
                     torch.arange(target_x.shape[0], device=dev).unsqueeze(1).unsqueeze(2),
                     subgraph_incides.unsqueeze(1),
@@ -254,7 +312,7 @@ class GraphJepa(nn.Module):
         target_y = F.normalize(target_y, dim=-1)
 
         if return_repr:
-            repr_z = self._representation(data)
+            repr_z = self._representation(data, online if reuse else None)
             return target_x, target_y, repr_z
         return target_x, target_y
 

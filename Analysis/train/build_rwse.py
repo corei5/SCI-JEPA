@@ -31,12 +31,12 @@ from torch_geometric.utils import scatter
 import torch_geometric.transforms as T
 
 from core.data_utils.paper_graph import build_hetero_graph, ASPECTS
+from core.paths import papers_layout
 
-
-# ─────────────────────────────────────────────────────────────
-RAW_DIR    = "/nfs/home/rabbyg/JEPA/Graph-JEPA/dataset/papers/raw"
-CACHE_PATH = "/nfs/home/rabbyg/JEPA/Graph-JEPA/dataset/papers/processed/hetero_graphA.pt"
-RWSE_CACHE = "/nfs/home/rabbyg/JEPA/Graph-JEPA/dataset/papers/processed/rwse_pe.pt"
+_PATHS = papers_layout()
+RAW_DIR    = _PATHS["raw"]
+CACHE_PATH = _PATHS["hetero"]
+RWSE_CACHE = _PATHS["rwse"]
 RWSE_STEPS = 16
 # ─────────────────────────────────────────────────────────────
 

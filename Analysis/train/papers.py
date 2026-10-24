@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import torch.nn.functional as F
-from core.config import cfg, update_cfg
+from core.config import cfg, update_cfg, resolve_config
 from core.get_data import create_dataset
 from core.get_model import create_model
 from core.trainer import run_k_fold
@@ -124,7 +124,7 @@ def test(loader, model, evaluator, device, criterion_type=0):
 
 
 if __name__ == '__main__':
-    cfg.merge_from_file('train/configs/papers.yaml')
+    cfg.merge_from_file(resolve_config('train/configs/papers.yaml'))
     cfg = update_cfg(cfg)
     cfg.k = 2  # 10
     run_k_fold(cfg, create_dataset, create_model, train, test)
