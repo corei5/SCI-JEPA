@@ -1,0 +1,37 @@
+# Python and environments
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+dist/
+build/
+
+# OS and editors
+.DS_Store
+.vscode/
+.idea/
+.claude/settings.local.json
+
+# Training outputs (never commit)
+runs/
+results/
+logs/
+log/
+checkpoints/
+lightning_logs/
+wandb/
+_hf_cache/
+_st_cache/
+
+# Raw data stays on disk or the cluster; the small processed caches already
+# tracked under Analysis/dataset/papers/ are kept.
+Analysis/dataset/**/raw/
+
+# Graphify output is regenerated locally on every build; never commit it.
+graphify-out/
+.graphify/
+
+meeting*

@@ -293,11 +293,15 @@ def _batches(sampler, plan_fn, n_steps, batch_size, prefetch, start=0, snap=None
             _StepBuilder(sampler, seed), batch_sampler=_StepPlan(sampler, plan_fn, n_steps, batch_size, start, snap),
             num_workers=workers, collate_fn=_first, prefetch_factor=max(prefetch, 4), pin_memory=torch.cuda.is_available(),
             multiprocessing_context="fork")
+        import gc
+        gc.collect()
+        gc.freeze()          # the index's Python lookups stay shared with the forked workers (no copy-on-write by the GC)
         it = iter(loader)
         try:
             yield from it
         finally:
             del it
+            gc.unfreeze()
         return
     def make(step):
         plan, phase = plan_fn(step)
@@ -362,7 +366,8 @@ def _fp32(out):
 # ---- resume a training run across jobs (cfg.resume_runs; run_experiment passes ckpt_path) --------------------
 CKPT_VERSION = 1
 _CKPT_IGNORE = ("out_dir", "model_dir", "index_dir", "device", "resume_runs", "ckpt_every", "llm_models",
-                "batch_workers", "tf32", "fused_adamw")   # speed settings: a run may resume with other values
+                "batch_workers", "tf32", "fused_adamw", "trainer", "devices",   # speed settings: a run may resume with other values
+                "arms")                                         # which arms a job may claim, not how this arm trains
 
 
 def _ckpt_key(cfg, seed):
@@ -495,14 +500,25 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
             live.restore(step)
     # progress for the infrastructure monitor (sci_jepa.infra): a tiny file about every 5 s, never fatal
     prog_name = live.name if live is not None else f"run_seed{seed}"
-    prog = {"t": time.time(), "step": step}
+    # loss_sum / loss_n: the JEPA loss since the last report (summed on the GPU, read every ~5 s); val: the latest
+    # validation (epoch end or live pass); rate: steps / s, smoothed so the time left does not jump
+    prog = {"t": time.time(), "step": step, "loss_sum": 0.0, "loss_n": 0, "ep_sum": 0.0, "ep_n": 0, "val": None,
+            "rate": None}
 
     def report(status, at):
         try:
             from sci_jepa.infra.monitor import write_progress
             now = time.time()
             rate = (at - prog["step"]) / max(now - prog["t"], 1e-9) if status == "training" else None
+            if rate:
+                prog["rate"] = rate if prog["rate"] is None else 0.8 * prog["rate"] + 0.2 * rate
             prog.update(t=now, step=at)
+            rate = prog["rate"] if status in ("training", "validating") else None
+            loss = float(prog["loss_sum"]) / prog["loss_n"] if prog["loss_n"] else None
+            prog.update(loss_sum=0.0, loss_n=0)
+            if loss is not None:
+                prog["loss"] = loss
+            v = prog["val"] or {}
             mem = {}
             if dev.type == "cuda":
                 mem = {"device": torch.cuda.get_device_name(dev),
@@ -514,7 +530,10 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
                            elapsed_s=round(now - t0), steps_per_s=round(rate, 3) if rate else None,
                            instances_per_s=round(rate * cfg.batch_size, 1) if rate else None,
                            eta_max_s=round((n_steps - at - 1) / rate) if rate else None,
-                           best_epoch=best_state["epoch"] if best_state else None,
+                           eta_finish=round(now + (n_steps - at - 1) / rate) if rate else None,
+                           loss=prog.get("loss"), loss_epoch=float(prog["ep_sum"]) / prog["ep_n"] if prog["ep_n"] else None,
+                           val_bal_mrr=v.get("bal_MRR"), val_chance=v.get("chance"), val_epoch=v.get("epoch"),
+                           val_kind=v.get("kind"), best_epoch=best_state["epoch"] if best_state else None,
                            batch_size=cfg.batch_size, params_trainable=int(sum(p.numel() for p in params)), **mem)
         except Exception:                               # noqa: BLE001  (monitoring never stops training)
             pass
@@ -534,8 +553,26 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
             "elapsed": time.time() - t0, "saved": time.strftime("%Y-%m-%d %H:%M:%S"),
             "job": os.environ.get("SLURM_JOB_ID")})
 
-    batches = iter(()) if train_done else _batches(sampler, plan_fn, n_steps, cfg.batch_size, prefetch, start,
-                                                         snap, workers, seed)
+    use_lightning = cfg.trainer == "lightning" and not train_done
+    if use_lightning:                                  # the same loop on PyTorch Lightning (training/lightning_loop.py)
+        from sci_jepa.training import lightning_loop as LL
+        ok, why = LL.supported(cfg, ckpt_path)
+        if not ok:
+            log(f"  [lightning] not used ({why}): native training loop")
+            use_lightning = False
+    if use_lightning:
+        res = LL.fit_lightning(model=model, cfg=cfg, gi=gi, dev=dev, seed=seed, log=log, live=live, opt=opt,
+                               sched=sched, scaler=scaler, params=params, sampler=sampler, plan_fn=plan_fn,
+                               n_steps=n_steps, prefetch=prefetch, workers=workers, epoch_ends=epoch_ends,
+                               epoch_of=epoch_of, track_best=track_best, shapes=shapes, gen=gen, t0=t0,
+                               history=history, epoch_results=epoch_results, report=report, prog=prog)
+        if res is None:                                # another rank of a multi-GPU run: rank 0 evaluates
+            return None
+        best_state, stopped_epoch, step, phase = res
+        batches = iter(())
+    else:
+        batches = iter(()) if train_done else _batches(sampler, plan_fn, n_steps, cfg.batch_size, prefetch, start,
+                                                       snap, workers, seed)
     for step, phase_now, insts, cpu_batch, sampler_state in batches:
         if phase_now != phase and cfg.mask_schedule == "sequential":
             log(f"  [mask] step {step}: phase -> masking '{phase_now}'"
@@ -580,6 +617,8 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
                     out["pred"][keep], p2.float(), cfg.contrast_margin)
         loss = sum(parts.values())
         ep_sum, ep_n = ep_sum + parts["jepa"].detach(), ep_n + 1
+        prog["loss_sum"], prog["loss_n"] = prog["loss_sum"] + parts["jepa"].detach(), prog["loss_n"] + 1
+        prog["ep_sum"], prog["ep_n"] = ep_sum, ep_n
         opt.zero_grad(set_to_none=True)
         if scaler is not None:                          # fp16: scale the loss so small gradients survive
             scaler.scale(loss).backward()
@@ -612,10 +651,13 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
                 live.step({**rec, "total": float(loss.detach()), "lr": float(sched.get_last_lr()[0]), "ema": m,
                            "grad_norm": gnorm, **_step_stats(out, batch, cfg)})
         if step in epoch_ends:
+            report("validating", step)
             rec = epoch_checkpoint(model, gi, cfg, dev, epoch_ends[step], step, float(ep_sum) / max(ep_n, 1),
                                    time.time() - t0, live)
             epoch_results.append(rec)
             ep_sum, ep_n = 0.0, 0
+            prog.update(ep_sum=0.0, ep_n=0, val={"bal_MRR": rec["bal_MRR"], "chance": rec.get("bal_chance"),
+                                                  "epoch": rec["epoch"], "kind": "epoch end"})
             rec["select_score"] = _select_score(rec, cfg)
             if track_best and (best_state is None or rec["select_score"] > best_state["score"]):
                 best_state = {"epoch": rec["epoch"], "score": rec["select_score"],
@@ -634,7 +676,12 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
                 break
         if live is not None and cfg.eval_every and step > 0 and step % cfg.eval_every == 0:
             quick = cfg.override(eval_instances=cfg.live_eval_instances, probe_papers=min(cfg.probe_papers, 40))
-            live.eval(step, evaluate(model, gi, quick, dev, None, split="val"), epoch=epoch_of(step))
+            report("validating", step)
+            qm = evaluate(model, gi, quick, dev, None, split="val")
+            live.eval(step, qm, epoch=epoch_of(step))
+            rb = qm.get("retrieval_balanced") or {}
+            if rb.get("MRR") is not None:
+                prog["val"] = {"bal_MRR": rb["MRR"], "chance": rb.get("chance_MRR"), "epoch": epoch_of(step), "kind": "live"}
             if cfg.neuron_report and step not in epoch_ends:
                 live.neurons(step, epoch_of(step), neuron_report(model, gi, cfg, dev, "val", cfg.neuron_instances))
         if sampler_state is not None:                   # every ckpt_every steps and at every epoch end
@@ -798,6 +845,15 @@ def expand_llm_arms(arms, cfg):
     return out
 
 
+def select_arms(arms, cfg):
+    """With cfg.arms, only those arm tags (an arm expanded by expand_llm_arms is selected by its base tag too, e.g.
+    "LLM-Reasoning" keeps every LLM-Reasoning@<model>). Without it, the arms are returned unchanged."""
+    if not cfg.arms:
+        return list(arms)
+    keep = set(cfg.arms)
+    return [(tag, over) for tag, over in arms if tag in keep or tag.split("@")[0] in keep]
+
+
 def _skipped(acfg, over):
     """Arms run_experiment skips (identical arms in paper mode; the LLM without a CUDA GPU)."""
     if acfg.ku_mode == "paper" and over.keys() & {"target_types", "mask_schedule", "replay_frac"}:
@@ -810,7 +866,7 @@ def missing_runs(cfg, exp, name=None):
     cfg.out_dir/<name>; [] = the experiment is complete."""
     out_dir = os.path.join(cfg.out_dir, name or exp)
     miss = []
-    for tag, over in expand_llm_arms(EXPERIMENTS[exp], cfg):
+    for tag, over in select_arms(expand_llm_arms(EXPERIMENTS[exp], cfg), cfg):
         acfg = cfg.override(**over)
         if _skipped(acfg, over):
             continue
@@ -847,6 +903,8 @@ def run_experiment(cfg, gi, exp=None, arms=None, log=print, live_root=None, resu
     nobody has taken: first the quick comparison systems (results within hours), then the trained arms (the
     longest), then the LLMs, so the GPUs finish at about the same time."""
     arms = expand_llm_arms(arms or (EXPERIMENTS[exp] if exp else [("single", {})]), cfg)
+    if exp:
+        arms = select_arms(arms, cfg)
     dynamic = shard is not None and os.environ.get("SCI_JEPA_CLAIM") == "1"
     if dynamic:                                         # quick comparison systems, trained arms, then the LLMs
         rank = lambda o: 1 if not o.get("baseline") else 2 if o.get("baseline") == "llm" else 0

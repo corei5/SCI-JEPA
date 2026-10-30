@@ -4,7 +4,8 @@ Live telemetry for the Paper A dashboard.
 Each run writes <root>/runs/<name>/live.json (atomically, so a reader never sees
 half a file) and registers itself in <root>/runs.json. The dashboard
 (dashboard.html, served by serve.py) polls both every few seconds, so curves
-update while training runs.
+update while training runs. With SCIJEPA_PUSH_URL and SCIJEPA_PUSH_TOKEN set, the
+folder is also pushed to the hosted dashboard while the run trains (push.py).
 """
 import json
 import math
@@ -71,6 +72,8 @@ class LiveRun:
                       "history": [], "evals": [], "relbias": None, "final": None, **(extra or {})}
         self._register()
         self._write()
+        from sci_jepa.dashboard.push import start_autopush
+        start_autopush(root)                             # hosted dashboard, if SCIJEPA_PUSH_URL/TOKEN are set
 
     def _register(self):
         idx = os.path.join(self.root, "runs.json")

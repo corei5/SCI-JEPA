@@ -468,7 +468,7 @@ The MiniCheck judge's own model code needs `einops` and `sentencepiece`; the job
 ## 10. Reporting, dashboard and infrastructure monitoring
 
 * **Dashboard** (`dashboard/`): `telemetry.LiveRun` writes each run's live state (steps, losses, learning rate, validation per epoch, tasks, neurons, world model) as JSON into `<out>/dashboard/runs/`; `dashboard.html` reads it (tabs: Overview, Training dynamics, Validation, Epochs, Reasoning tasks, World model, Neurons, Where it learns, Examples, Graphs, Benchmark, Compare, All runs, Infrastructure). `serve.py` serves the folder over HTTP; in the cluster script one server per job serves the shared folder.
-* **Infrastructure** (`infra/`): `sysinfo.collect()` records the machine (GPUs, MIG slices, driver, CUDA, CPU, memory, Slurm allocation, package versions). `monitor.start()` samples every second with NVML and psutil (GPU utilisation, memory, power, temperature; CPU, RAM) into `infra/<job>/timeseries.csv` and `dashboard/infra/live.json`; training processes write progress (step, epoch, steps/s, ETA) to `infra/progress/`. `report.write_all()` produces `infrastructure.{json,md,tex}` and `figures/infra_*.{png,pdf}` per experiment.
+* **Infrastructure** (`infra/`): `sysinfo.collect()` records the machine (GPUs, MIG slices, driver, CUDA, CPU, memory, Slurm allocation, package versions). `monitor.start()` samples every second with NVML and psutil (GPU utilisation, memory, power, temperature; CPU, RAM) into `infra/<job>/timeseries.csv` and `dashboard/infra/jobs/<cluster>-<job>.json` (one file per job, so jobs on several nodes and clusters all show); training processes write progress (step, epoch, steps/s, ETA) to `infra/progress/`. `report.write_all()` produces `infrastructure.{json,md,tex}` and `figures/infra_*.{png,pdf}` per experiment.
 * **Figures and PDF** (`reporting/figures.py`, `reporting/report_pdf.py`): leaderboards (`leaderboard.csv`, `leaderboard.tex`), the reasoning index with intervals, task heatmaps, robustness per edit kind, per-domain scores, learning curves, LLM comparison, and a multi-page PDF report.
 
 ---
@@ -526,7 +526,7 @@ $STORE/SCI-JEPA/<run>/                       PAPER_A_OUT
 │   ├── infrastructure.{json,md,tex}         hardware, software, compute per method
 │   ├── checkpoints/                         resume files of runs in progress (deleted when done)
 │   └── claims/                              run claims of the current job
-├── dashboard/                               dashboard page, runs/*.json, graphs, infra/live.json
+├── dashboard/                               dashboard page, runs/*.json, graphs, infra/jobs/*.json
 ├── infra/<job>/                             system.json, timeseries.csv per job
 ├── infra/progress/, plan.json, status.json  progress per run, planned runs, completion state
 └── chains.txt                               chain files of this run (run_60k.sh)

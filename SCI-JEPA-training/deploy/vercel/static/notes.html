@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>SCI-JEPA team notes</title><link rel="stylesheet" href="/site.css">
+<script src="/hosted.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<style>
+#text{width:100%;min-height:55vh;font:13px/1.5 ui-monospace,Menlo,monospace;resize:vertical}
+#view{overflow-wrap:anywhere}#view h1,#view h2{font-size:18px;margin:18px 0 6px}#view h3{font-size:15px}
+#view pre{background:var(--soft);padding:10px;border-radius:6px;overflow:auto}#view code{background:var(--soft);padding:1px 4px;border-radius:4px}
+#view table td,#view table th{border:1px solid var(--line)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+</style></head><body>
+<header><h1>Team notes</h1><!--SITENAV--></header>
+<main>
+ <div class="row"><button id="edit">Edit</button><button id="save" class="primary" hidden>Save</button><button id="cancel" hidden>Cancel</button>
+  <input id="by" placeholder="your name" style="width:150px" hidden><span id="meta" class="muted"></span></div>
+ <div class="card"><div id="view"></div><textarea id="text" hidden spellcheck="true"></textarea></div>
+ <p class="muted">Markdown. Use it for the current plan, decisions, blockers and anything the team should see next to the runs.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const TEMPLATE="## Current plan\n\n- \n\n## Decisions\n\n- \n\n## Blockers\n\n- \n\n## Links\n\n- ";
+let N={text:"",rev:0},editing=false;
+try{$("by").value=localStorage.getItem("scijepa-name")||"";}catch(e){}
+function show(){
+  $("view").innerHTML=N.text?DOMPurify.sanitize(marked.parse(N.text)):'<p class="muted">No notes yet. Press Edit to start.</p>';
+  $("meta").textContent=N.updated?`last saved by ${N.by||"someone"}, ${new Date(N.updated).toLocaleString()}`:"";
+}
+function mode(on){editing=on;$("text").hidden=!on;$("view").hidden=on;$("save").hidden=!on;$("cancel").hidden=!on;$("by").hidden=!on;$("edit").hidden=on;}
+async function load(){const r=await fetch("/api/notes");if(r.status===401){location.href="/login.html?next=/notes.html";return;}N=await r.json();if(!editing)show();}
+$("edit").onclick=()=>{$("text").value=N.text||TEMPLATE;mode(true);$("text").focus();};
+$("cancel").onclick=()=>{mode(false);show();};
+$("save").onclick=async()=>{
+  const by=$("by").value.trim();try{localStorage.setItem("scijepa-name",by);}catch(e){}
+  const r=await fetch("/api/notes",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:$("text").value,by,rev:N.rev})});
+  if(r.status===409){const cur=await r.json();
+    alert(`${cur.by||"Someone"} saved the notes while you were editing. Your text is kept in the editor: copy your changes, press Cancel to see theirs, then edit again.`);
+    N=cur;return;}
+  if(!r.ok){alert("Save failed: "+r.status);return;}
+  N=await r.json();mode(false);show();
+};
+window.addEventListener("beforeunload",e=>{if(editing&&$("text").value!==(N.text||TEMPLATE)){e.preventDefault();e.returnValue="";}});
+load();setInterval(()=>{if(!editing)load();},30000);
+</script></body></html>

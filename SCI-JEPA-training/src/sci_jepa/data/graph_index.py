@@ -134,8 +134,10 @@ class GraphIndex:
 
 
 # ----------------------------------------------------------------------
-def build_proxy_edges(x, comp_paper, tau, topk, device):
-    """Cross-paper near-duplicate pairs (i < j) among KUs of one type."""
+def build_proxy_edges(x, comp_paper, tau, topk, device, block=1024):
+    """Cross-paper near-duplicate pairs (i < j) among KUs of one type. Rows are scored in blocks: a block
+    holds block x n fp32 scores plus a bool mask, ~10 GB at 2M KUs (4096 rows needed ~49 GB with z, more
+    than a 48 GB L40S). Each row's top-k does not depend on the block size."""
     n = x.shape[0]
     if n < 2:
         return np.zeros((0, 2), dtype=np.int64)
@@ -143,9 +145,9 @@ def build_proxy_edges(x, comp_paper, tau, topk, device):
     owner = torch.as_tensor(comp_paper, device=device)
     k = min(topk + 1, n)
     pairs = []
-    for s in range(0, n, 4096):
-        sim = z[s:s + 4096] @ z.T
-        rows = torch.arange(s, min(s + 4096, n), device=device)
+    for s in range(0, n, block):
+        sim = z[s:s + block] @ z.T
+        rows = torch.arange(s, min(s + block, n), device=device)
         sim[owner[rows].unsqueeze(1) == owner.unsqueeze(0)] = -1.0   # cross-paper only (also kills self)
         val, idx = sim.topk(k, dim=1)
         keep = val >= tau
@@ -154,6 +156,45 @@ def build_proxy_edges(x, comp_paper, tau, topk, device):
         pairs.append(torch.stack([torch.minimum(r, c), torch.maximum(r, c)], 1).cpu())
     out = torch.unique(torch.cat(pairs, 0), dim=0)
     return out.numpy().astype(np.int64)
+
+
+# The KU and counterfactual vectors (44.6M x 768 fp16 = 69 GB on the full arXiv split) live next to the index as
+# .npy files, opened memory-mapped and read-only: every training process on a node then shares one cached copy instead
+# of loading its own (four copies OOM-killed jobs 38878 / 38883), and a process reads only the rows it touches.
+MMAP_KEYS = ("comp_x", "mp_x")
+
+
+def _sidecar(path, key):
+    return f"{path[:-3]}.{key}.npy"
+
+
+def save_index(blob, path):
+    """Write the index: MMAP_KEYS as .npy files, the rest as the .pt (each written to a temporary name, then renamed:
+    a process loading at the same time sees the old or the new index, never half of one)."""
+    rest = dict(blob)
+    for k in MMAP_KEYS:
+        if isinstance(rest.get(k), np.ndarray):
+            tmp = _sidecar(path, k)[:-4] + f".{os.getpid()}.tmp.npy"
+            np.save(tmp, rest.pop(k))
+            os.replace(tmp, _sidecar(path, k))
+    tmp = f"{path}.{os.getpid()}.tmp"
+    torch.save(rest, tmp, pickle_protocol=4)          # torch's default protocol 2 fails on objects > 4 GiB (full arXiv)
+    os.replace(tmp, path)
+
+
+def load_index(path):
+    """SCIJEPA_MMAP_DIR: a folder holding copies of the .npy vector files (e.g. on a node's RAM disk) to open instead of
+    the ones next to the index, for nodes that read the shared disk slowly."""
+    blob = torch.load(path, weights_only=False)
+    for k in MMAP_KEYS:
+        f = _sidecar(path, k)
+        local = os.path.join(os.environ.get("SCIJEPA_MMAP_DIR", ""), os.path.basename(f))
+        if os.environ.get("SCIJEPA_MMAP_DIR") and os.path.exists(local) and os.path.getsize(local) == os.path.getsize(f):
+            f = local
+        if k not in blob and os.path.exists(f):
+            blob[k] = np.load(f, mmap_mode="r")
+            print(f"[paper_a.index] {k}: memory-mapped {f}", flush=True)
+    return blob
 
 
 def get_index(cfg):
@@ -165,7 +206,7 @@ def get_index(cfg):
     text_path = path[:-3] + ".texts.pkl"
     if os.path.exists(path):
         print(f"[paper_a.index] loaded {path}")
-        gi = GraphIndex(torch.load(path, weights_only=False))
+        gi = GraphIndex(load_index(path))
         gi._text_path = text_path
         return gi
     blob = build_blob(cfg)
@@ -174,7 +215,7 @@ def get_index(cfg):
     with open(text_path, "wb") as f:                  # full KU texts: only the text baselines read them
         pickle.dump({"comp_text": blob.pop("comp_text"), "mp_text": blob.pop("mp_text", [])}, f,
                     protocol=pickle.HIGHEST_PROTOCOL)
-    torch.save(blob, path)
+    save_index(blob, path)
     print(f"[paper_a.index] saved {path}")
     from sci_jepa.data.ku_graph import embed_cache_dir
     import shutil
@@ -182,3 +223,20 @@ def get_index(cfg):
     gi = GraphIndex(blob)
     gi._text_path = text_path
     return gi
+
+
+
+if __name__ == "__main__":
+    # convert an index saved as one .pt into .pt + memory-mapped .npy vectors (once; loading works either way):
+    #   python -m sci_jepa.data.graph_index --mmap <runs/.../paper_a_ku_index_<fingerprint>.pt>
+    import argparse
+    ap = argparse.ArgumentParser("graph_index")
+    ap.add_argument("--mmap", required=True)
+    a = ap.parse_args()
+    b = torch.load(a.mmap, weights_only=False)
+    todo = [k for k in MMAP_KEYS if isinstance(b.get(k), np.ndarray)]
+    print(f"{a.mmap}: memory-mapping {todo or 'nothing (already converted)'}", flush=True)
+    if todo:
+        save_index(b, a.mmap)
+        print("done:", {k: f"{os.path.getsize(_sidecar(a.mmap, k)) / 2**30:.1f} GiB" for k in todo},
+              f"pt {os.path.getsize(a.mmap) / 2**30:.1f} GiB")

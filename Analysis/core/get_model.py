@@ -104,6 +104,8 @@ def create_model(cfg):
                 num_context_patches=cfg.jepa.num_context,
                 num_target_patches=cfg.jepa.num_targets,
                 ema_momentum=ema_momentum,          # NEW
+                reuse_online_pass=bool(getattr(cfg.train, 'reuse_online_pass', True)),
+                foreach_ema=bool(getattr(cfg.train, 'foreach_ema', True)),
             )
         else:
             print('Not supported...')

@@ -61,13 +61,15 @@ def encode_papers(model, gi, papers, cfg, dev, which="target", bs=64):
 
 def variance_share(H, groups):
     """Fraction of total variance that is WITHIN groups."""
+    # one pass instead of a loop over groups (50k papers at 2M): within = total - sum_g n_g |mean_g|^2, in float64
+    H = H.double()
     H = H - H.mean(0)
     tot = H.pow(2).sum()
-    within = 0.0
-    for g in groups.unique():
-        Hg = H[groups == g]
-        within += (Hg - Hg.mean(0)).pow(2).sum()
-    return float(within / tot.clamp_min(1e-12))
+    _, g = groups.unique(return_inverse=True)
+    sums = torch.zeros(int(g.max()) + 1, H.shape[1], dtype=H.dtype, device=H.device).index_add_(0, g, H)
+    n = torch.bincount(g, minlength=sums.shape[0]).to(H.dtype)
+    within = tot - (sums.pow(2).sum(1) / n.clamp_min(1)).sum()
+    return float(within.clamp_min(0) / tot.clamp_min(1e-12))
 
 
 def type_centre(H, typ):
@@ -187,7 +189,13 @@ def hard_pool(gi, p0, same, bank_paper, K, rng, mode="topic"):
             return []
         V = gi.problem_vec()
         sim = V[bank_paper[cand]] @ V[p0]
-        order = np.lexsort((rng.random(len(cand)), -sim))
+        tie = rng.random(len(cand))                     # drawn in full: the rng stream stays as before
+        if len(cand) > 4 * K:                           # top K by (-sim, tie) without sorting every candidate
+            kth = np.partition(-sim, K - 1)[K - 1]
+            sub = np.flatnonzero(-sim <= kth)           # every candidate tied with the K-th stays in
+            order = sub[np.lexsort((tie[sub], -sim[sub]))]
+        else:
+            order = np.lexsort((tie, -sim))
         return [int(c) for c in cand[order[:K]]]
     tiers = [gi.subfield_papers[int(gi.paper_subfield[p0])],
              list(gi.paper_nbrs.get(p0, {}).keys()),

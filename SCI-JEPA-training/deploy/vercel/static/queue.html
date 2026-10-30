@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>SCI-JEPA job queue</title><link rel="stylesheet" href="/site.css">
+<script src="/hosted.js"></script></head><body>
+<header><h1>SLURM queue</h1><!--SITENAV--></header>
+<main>
+ <div class="card"><div id="head" class="muted">waiting for the cluster's first push…</div></div>
+ <div class="card scroll"><table id="jobs"></table></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function poll(){
+  let Q;try{const r=await fetch("cluster/squeue.json");if(!r.ok)return;Q=await r.json();}catch(e){return;}
+  const n=s=>(Q.jobs||[]).filter(j=>j.state===s).length;
+  $("head").innerHTML=`<b>${(Q.jobs||[]).length}</b> jobs · <b>${n("RUNNING")}</b> running · <b>${n("PENDING")}</b> pending`+
+    ` <span class="muted">· from <code>${esc(Q.host)}</code> at ${esc(new Date(Q.time).toLocaleString())} · <code>${esc(Q.cmd)}</code></span>`+
+    (Q.error?`<div style="color:var(--bad)">squeue failed: ${esc(Q.error)}</div>`:"");
+  const rows=(Q.jobs||[]).map(j=>`<tr><td>${esc(j.id)}</td><td>${esc(j.name)}</td><td>${esc(j.user)}</td><td><span class="badge ${esc(j.state)}">${esc(j.state)}</span></td>`+
+    `<td class="num">${esc(j.elapsed)}</td><td class="num">${esc(j.limit)}</td><td class="num">${esc(j.nodes)}</td><td>${esc(j.partition)}</td><td class="muted">${esc(j.reason)}</td></tr>`).join("");
+  $("jobs").innerHTML=`<tr><th>job</th><th>name</th><th>user</th><th>state</th><th>elapsed</th><th>limit</th><th>nodes</th><th>partition</th><th>node list / reason</th></tr>`+
+    (rows||`<tr><td colspan="9" class="muted">No jobs in the queue.</td></tr>`);
+}
+poll();setInterval(poll,10000);
+</script></body></html>

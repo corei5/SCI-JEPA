@@ -50,7 +50,7 @@ class HashEmbedder:
 
 
 class STEmbedder:
-    def __init__(self, name, device, max_tokens, batch=32, prefix="", bucket=512, dtype="float32"):
+    def __init__(self, name, device, max_tokens, batch=32, prefix="", bucket=512, dtype="float32", tokens=8192):
         from sentence_transformers import SentenceTransformer
         self.m = SentenceTransformer(name, device=device)
         if max_tokens:
@@ -58,19 +58,19 @@ class STEmbedder:
         if dtype != "float32" and str(device) != "cpu":   # fp16 on GPU: 1.9x faster, cosine to fp32 >= 0.99999
             self.m.to(getattr(torch, dtype))
         self.dim = self.m.get_sentence_embedding_dimension()
-        self.batch, self.prefix, self.bucket = batch, prefix, bucket
+        self.batch, self.prefix, self.bucket, self.tokens = batch, prefix, bucket, tokens
         self.n_seen = self.n_truncated = 0
         print(f"[ku_graph] text encoder {name}: {self.dim}-d, context {self.m.max_seq_length} tokens, {device}, "
               f"{dtype}, padding to multiples of {bucket}")
 
-    def encode(self, texts, token_budget=8192, bucket=None):
+    def encode(self, texts, token_budget=None, bucket=None):
         """Batches by a token budget (many short KUs, few long papers per pass) and pads
         to a multiple of `bucket`: on Apple GPUs every distinct sequence length keeps its
         own cached buffers, and thousands of lengths ran an 88 GB GPU out of memory.
         Texts are sorted by length, so 64 gives only 32 distinct lengths (at 2,048 tokens),
         identical vectors and 4.3x the speed of 512 on short KUs (median 36 tokens)."""
         import torch
-        bucket = bucket or self.bucket
+        bucket, token_budget = bucket or self.bucket, token_budget or self.tokens
         if self.prefix:
             texts = [self.prefix + t for t in texts]
         tok, L = self.m.tokenizer, self.m.max_seq_length
@@ -107,24 +107,47 @@ class ResumableEmbedder:
 
     def __init__(self, emb, root, chunk=8192):
         self.emb, self.root, self.chunk, self.reused = emb, root, chunk, 0
+        self.n_chunks = 0                                  # chunks seen so far (prefill: which ones are this process's)
         os.makedirs(root, exist_ok=True)
 
     def __getattr__(self, k):
         return getattr(self.emb, k)
 
+    def _file(self, part):
+        return os.path.join(self.root, hashlib.sha1("\x1e".join(part).encode()).hexdigest()[:20] + ".npy")
+
+    def _encode_part(self, part, f):
+        X = np.asarray(self.emb.encode(part), dtype=np.float16)
+        tmp = f"{f[:-4]}.{os.getpid()}.tmp.npy"            # per process: prefill workers may encode the same chunk
+        np.save(tmp, X)
+        os.replace(tmp, f)                                 # complete files only
+        return X
+
     def encode(self, texts):
         out = []
         for s in range(0, len(texts), self.chunk):
             part = list(texts[s:s + self.chunk])
-            f = os.path.join(self.root, hashlib.sha1("\x1e".join(part).encode()).hexdigest()[:20] + ".npy")
+            f = self._file(part)
+            self.n_chunks += 1
             if os.path.exists(f):
                 out.append(np.load(f)); self.reused += len(part)
                 continue
-            X = np.asarray(self.emb.encode(part), dtype=np.float16)
-            np.save(f[:-4] + ".tmp.npy", X)
-            os.replace(f[:-4] + ".tmp.npy", f)             # complete files only
-            out.append(X)
+            out.append(self._encode_part(part, f))
         return np.concatenate(out) if out else np.zeros((0, self.emb.dim), np.float16)
+
+    def prefill(self, texts, shard, n_shards):
+        """Encode only this process's chunks (every n_shards-th, from shard) that are not cached yet; returns the
+        number encoded. The build later finds them by their text hash (prefill_embeddings)."""
+        done = 0
+        for s in range(0, len(texts), self.chunk):
+            k, self.n_chunks = self.n_chunks, self.n_chunks + 1
+            if k % n_shards != shard:
+                continue
+            part = list(texts[s:s + self.chunk])
+            f = self._file(part)
+            if not os.path.exists(f):
+                self._encode_part(part, f); done += 1
+        return done
 
 
 def embed_cache_dir(cfg):
@@ -135,7 +158,7 @@ def make_embedder(cfg, dev):
     if cfg.embedder == "hash":
         return HashEmbedder(cfg.feat_dim)
     return STEmbedder(cfg.embed_model, dev, cfg.embed_max_tokens, cfg.embed_batch, cfg.embed_prefix,
-                      cfg.embed_bucket, cfg.embed_dtype)
+                      cfg.embed_bucket, cfg.embed_dtype, cfg.embed_tokens)
 
 
 # ---------------------------------------------------------------- reading
@@ -260,6 +283,73 @@ def keep_record(rec, cfg):
 
 
 # ---------------------------------------------------------------- build
+def _corpus(cfg):
+    """The records of the corpus in build order, and its balance report (build_blob, prefill_embeddings)."""
+    balance = None
+    if cfg.split_dir:                                  # stored split (sci-jepa split): no re-sampling or re-splitting
+        from sci_jepa.data.split import iter_stored, load_manifest
+        man = load_manifest(cfg.split_dir)
+        balance = {"stored_split": cfg.split_dir, "split_id": man["split_id"], **man["balance"],
+                   "pool_by_domain": man["pool_by_domain"], "selected_by_domain": {s: v["by_domain"] for s, v in man["selected"].items()}}
+        print(f"[ku_graph] stored split {cfg.split_dir} ({man['split_id']}): years {man['years']}", flush=True)
+        return iter_stored(cfg, READ_COLS), balance
+    if cfg.field_balance != "none" and cfg.max_papers:   # domain-balanced corpus
+        sel, balance = select_balanced(cfg)
+        return iter_selected(cfg, sel), balance
+    return iter_records(cfg), balance
+
+
+def _paper_kus(rec, cfg):
+    """(kus, edges, year) of one record as the index uses them, or None with the reason it is left out; and the
+    record's KU statistics (None if filtered before parsing)."""
+    keep, y = keep_record(rec, cfg)
+    if not keep:
+        return None, "filtered", None
+    kus, edges, st = S.record_to_kus(rec, cfg.ku_min_chars, cfg.optional_kus)
+    types = [t for t, _, _ in kus]
+    if len(kus) < cfg.min_kus_per_paper or not all(t in types for t in cfg.required_kus):
+        return None, "too_few_kus", st
+    if cfg.ku_mode == "paper":                         # same papers as section mode, each collapsed into one KU
+        kus, edges = S.paper_ku(kus, edges)
+    return (kus, edges, y), None, st
+
+
+def _build_progress(cfg, status, **fields):
+    """The build's progress for the dashboard's Infrastructure page (infra.monitor); never fatal."""
+    try:
+        if os.path.isdir(cfg.out_dir):
+            from sci_jepa.infra.monitor import write_progress
+            write_progress(cfg.out_dir, "KU index build", status=status, **fields)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
+def prefill_embeddings(cfg, shard, n_shards):
+    """Encode every n_shards-th chunk of the KU texts (from `shard`) into the build's embedding cache, so several
+    GPUs (other nodes too: the cache is on shared disk) encode while one build runs. Walks the corpus exactly as
+    build_blob does and keeps only the text buffer; the build skips every chunk a prefill wrote."""
+    from sci_jepa.config import resolve_device
+    emb = ResumableEmbedder(make_embedder(cfg, resolve_device(cfg.device)), embed_cache_dir(cfg))
+    print(f"[ku_graph] prefill {shard}/{n_shards} -> {emb.root}", flush=True)
+    records, _ = _corpus(cfg)
+    buf, n_pap, done, t0 = [], 0, 0, time.time()
+    for rec in records:
+        got, _, _ = _paper_kus(rec, cfg)
+        if got is None:
+            continue
+        n_pap += 1
+        buf += [text for _, text, _ in got[0]]
+        if len(buf) >= cfg.embed_chunk:
+            done += emb.prefill(buf, shard, n_shards); buf = []
+        if n_pap % 50000 == 0:
+            print(f"[ku_graph] prefill {shard}/{n_shards}: {n_pap} papers, {emb.n_chunks} chunks seen, {done} encoded "
+                  f"({time.time() - t0:.0f}s)", flush=True)
+        if cfg.max_papers and not cfg.split_dir and n_pap >= cfg.max_papers:
+            break
+    done += emb.prefill(buf, shard, n_shards)
+    print(f"[ku_graph] prefill {shard}/{n_shards} done: {n_pap} papers, {done} chunks encoded ({time.time() - t0:.0f}s)")
+
+
 def build_blob(cfg, records=None):
     """records: optional iterable of dicts in the normalized schema (synthetic
     tests); default streams cfg.parquet_dirs."""
@@ -270,17 +360,12 @@ def build_blob(cfg, records=None):
         emb = ResumableEmbedder(emb, embed_cache_dir(cfg))
     t0 = time.time()
     balance = None
-    if records is None and cfg.split_dir:              # stored split (sci-jepa split): no re-sampling or re-splitting
-        from sci_jepa.data.split import iter_stored, load_manifest
-        man = load_manifest(cfg.split_dir)
-        balance = {"stored_split": cfg.split_dir, "split_id": man["split_id"], **man["balance"],
-                   "pool_by_domain": man["pool_by_domain"], "selected_by_domain": {s: v["by_domain"] for s, v in man["selected"].items()}}
-        print(f"[ku_graph] stored split {cfg.split_dir} ({man['split_id']}): years {man['years']}", flush=True)
-        records = iter_stored(cfg, READ_COLS)
-    elif records is None and cfg.field_balance != "none" and cfg.max_papers:   # domain-balanced corpus
-        sel, balance = select_balanced(cfg)
-        records = iter_selected(cfg, sel)
-    records = iter_records(cfg) if records is None else records
+    n_expected = None
+    if records is None:
+        records, balance = _corpus(cfg)
+        if balance and balance.get("stored_split"):
+            n_expected = sum(sum(v.values()) for v in balance["selected_by_domain"].values()) or None
+    _build_progress(cfg, "building index", done=0, total=n_expected, elapsed_s=0)
 
     comp_x, comp_type, comp_paper, comp_flags, comp_snip, comp_text = [], [], [], defaultdict(list), [], []
     role_src, role_dst, role_rel = [], [], []
@@ -297,19 +382,14 @@ def build_blob(cfg, records=None):
             buf_txt.clear()
 
     for rec in records:
-        keep, y = keep_record(rec, cfg)
-        if not keep:
-            skipped["filtered"] += 1
+        got, why, st = _paper_kus(rec, cfg)
+        if st:
+            stats.update(st)
+        if got is None:
+            skipped[why] += 1
             continue
-        kus, edges, st = S.record_to_kus(rec, cfg.ku_min_chars, cfg.optional_kus)
-        stats.update(st)
-        types = [t for t, _, _ in kus]
-        if len(kus) < cfg.min_kus_per_paper or not all(t in types for t in cfg.required_kus):
-            skipped["too_few_kus"] += 1
-            continue
-        if cfg.ku_mode == "paper":           # same papers as section mode, each collapsed into one KU
-            kus, edges = S.paper_ku(kus, edges)
-        elif cfg.ku_mode == "paper_masked":
+        kus, edges, y = got
+        if cfg.ku_mode == "paper_masked":
             pm_parts.append((kus, edges))
         p = len(p_year)
         p_year.append(-1 if y is None else y)
@@ -334,7 +414,11 @@ def build_blob(cfg, records=None):
         if len(buf_txt) >= cfg.embed_chunk:
             flush()
         if len(p_year) % 10000 == 0:
-            print(f"[ku_graph] {len(p_year)} papers, {n_comp} KUs ({time.time() - t0:.0f}s)", flush=True)
+            el = time.time() - t0
+            print(f"[ku_graph] {len(p_year)} papers, {n_comp} KUs ({el:.0f}s)", flush=True)
+            _build_progress(cfg, "building index", task="papers and KU texts", done=len(p_year), total=n_expected,
+                            elapsed_s=round(el), queries_per_s=round(len(p_year) / max(el, 1e-9), 1),
+                            eta_max_s=round((n_expected - len(p_year)) * el / len(p_year)) if n_expected else None)
         if cfg.max_papers and not cfg.split_dir and len(p_year) >= cfg.max_papers:   # stored split: capped per split
             break
     flush()
@@ -571,7 +655,14 @@ if __name__ == "__main__":
     from sci_jepa.training.train import parse_overrides
     ap = argparse.ArgumentParser("ku_graph")
     ap.add_argument("--set", nargs="*", default=[])
-    cfg = PaperAConfig().override(**parse_overrides(ap.parse_args().set))
+    ap.add_argument("--prefill", default="", help="i/n: only encode every n-th text chunk into the embedding cache "
+                    "(from i) and exit; run several on other GPUs while one build runs (prefill_embeddings)")
+    args = ap.parse_args()
+    cfg = PaperAConfig().override(**parse_overrides(args.set))
+    if args.prefill:
+        i, n = (int(x) for x in args.prefill.split("/"))
+        prefill_embeddings(cfg, i, n)
+        raise SystemExit(0)
     from sci_jepa.data.graph_index import get_index
     gi = get_index(cfg)
     import json

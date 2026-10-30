@@ -13,7 +13,10 @@ train:
   batch_size: 128
   lr: 0.0001              # was 0.0002 — halved; 2e-4 collapses small graphs faster
   runs: 5
-  # ── anti-collapse regularizer weights (read in your training loop) ──
+  grad_clip: 1.0
+  objective: vicreg
+  ema_scope: full
+  # ── anti-collapse regularizer weights (read by the Lightning objective) ──
   var_weight: 1.0         # NEW — VICReg variance hinge weight
   cov_weight: 0.04        # NEW — VICReg covariance weight
 metis:

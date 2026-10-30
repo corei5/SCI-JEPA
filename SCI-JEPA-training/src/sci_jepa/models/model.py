@@ -53,6 +53,44 @@ def rel_bias(emb, rel):
     return emb(rel)
 
 
+class _RelBiasHeads(torch.autograd.Function):
+    """bias[b, h, i, j] = w[rel[b, i, j], h], built straight in the attention layout (B, heads, T, T) and dtype:
+    one gather of 2-byte values instead of an fp32 (B, T, T, heads) lookup, a permute, and a cast copy (the
+    lookup alone was ~30% of a training step on an H100). Same values. Backward as _RelBias (one-hot product,
+    fp32, no TF32), with the one-hot shared by every layer that reads the same rel tensor."""
+
+    @staticmethod
+    def forward(ctx, rel, w, dtype, onehot):
+        ctx.save_for_backward(onehot)
+        ctx.w_dtype = w.dtype
+        return w.t().to(dtype)[:, rel].transpose(0, 1)
+
+    @staticmethod
+    def backward(ctx, g):
+        (onehot,) = ctx.saved_tensors
+        gh = g.transpose(0, 1).reshape(g.shape[1], -1).float()        # (heads, B*T*T)
+        tf32 = torch.backends.cuda.matmul.allow_tf32
+        torch.backends.cuda.matmul.allow_tf32 = False
+        try:
+            gw = gh @ onehot                                           # (heads, N_RELS)
+        finally:
+            torch.backends.cuda.matmul.allow_tf32 = tf32
+        return None, gw.t().to(ctx.w_dtype), None, None
+
+
+def rel_bias_heads(emb, rel, dtype):
+    """Relation biases of every token pair as a (B, heads, T, T) attention mask in `dtype`."""
+    w = emb.weight
+    if rel.is_cuda and w.requires_grad and torch.is_grad_enabled():
+        onehot = getattr(rel, "_relbias_onehot", None)                 # built once per batch, freed with it
+        if onehot is None or onehot.shape[1] != w.shape[0]:
+            onehot = torch.zeros(rel.numel(), w.shape[0], dtype=torch.float32, device=rel.device)
+            onehot.scatter_(1, rel.reshape(-1, 1), 1.0)
+            rel._relbias_onehot = onehot
+        return _RelBiasHeads.apply(rel, w, dtype, onehot)
+    return w.t().to(dtype)[:, rel].transpose(0, 1)
+
+
 class RelBiasAttention(nn.Module):
     def __init__(self, d, heads, dropout, fused=False, edges_only=False):
         super().__init__()
@@ -79,8 +117,10 @@ class RelBiasAttention(nn.Module):
         B, T, _ = x.shape
         q, k, v = self.qkv(x).view(B, T, 3, self.h, self.dk).permute(2, 0, 3, 1, 4)
         if self.fused and not self.capture:
-            bias = rel_bias(self.rel_bias, rel).permute(0, 3, 1, 2).masked_fill(self._mask(rel, pad), float("-inf"))
-            o = F.scaled_dot_product_attention(q, k, v, attn_mask=bias.to(q.dtype),
+            block = torch.zeros(B, 1, T, T, dtype=q.dtype, device=x.device).masked_fill(self._mask(rel, pad),
+                                                                                        float("-inf"))
+            bias = rel_bias_heads(self.rel_bias, rel, q.dtype) + block
+            o = F.scaled_dot_product_attention(q, k, v, attn_mask=bias,
                                                dropout_p=self.drop.p if self.training else 0.0)
             return self.out(o.transpose(1, 2).reshape(B, T, -1))
         att = (q @ k.transpose(-1, -2)) / math.sqrt(self.dk)
@@ -350,7 +390,10 @@ class PaperAModel(nn.Module):
 
 def to_device(batch, dev):
     if isinstance(batch, dict):
-        return {k: to_device(v, dev) for k, v in batch.items()}
+        out = {k: to_device(v, dev) for k, v in batch.items()}
+        if torch.is_tensor(out.get("rel")) and out["rel"].dtype == torch.uint8:
+            out["rel"] = out["rel"].long()              # collated as uint8, widened after the copy
+        return out
     if isinstance(batch, (tuple, list)) and batch and torch.is_tensor(batch[0]):
         return type(batch)(t.to(dev, non_blocking=True) for t in batch)
     return batch.to(dev, non_blocking=True) if torch.is_tensor(batch) else batch   # async from pinned memory

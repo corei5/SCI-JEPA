@@ -210,7 +210,7 @@ const store={get:k=>{try{return localStorage.getItem(k);}catch(e){return null;}}
 $("tabs").innerHTML=NAV.map(([g,ks])=>`<div class="grp">${g}</div>`+ks.filter(k=>TAB_LABEL[k]).map(k=>
   `<button data-t="${k}" title="${TAB_LABEL[k]}"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_IC[k]||""}</svg><span class="lb">${TAB_LABEL[k]}</span></button><div class="toc" data-toc="${k}"></div>`).join("")).join("")+
   `<div class="foot"><button id="nav-side" title="move the panel to the other side">⇄ side</button><button id="nav-mini" title="icons only / full labels">◧ compact</button></div>`;
-$("tabs").onclick=e=>{const b=e.target.closest("button[data-t]");if(b){tab=b.dataset.t;store.set("sj-tab",tab);showTab();window.scrollTo(0,0);return;}
+$("tabs").onclick=e=>{const b=e.target.closest("button[data-t]");if(b){tab=b.dataset.t;store.set("sj-tab",tab);showTab(true);window.scrollTo(0,0);return;}
   const a=e.target.closest(".toc a");if(a){const el=document.getElementById(a.dataset.go);if(el)el.scrollIntoView({behavior:"smooth",block:"start"});}};
 (()=>{const app=$("app"),s=store.get("sj-side"),m=store.get("sj-mini");if(s)app.dataset.side=s;if(m==="1")app.classList.add("mini");
   $("nav-side").onclick=()=>{app.dataset.side=app.dataset.side==="right"?"left":"right";store.set("sj-side",app.dataset.side);};
@@ -225,11 +225,22 @@ function navToc(){   // "on this page": every card title of the open view, so ea
   const heads=[...sec.querySelectorAll(".card")].map((c,i)=>{const h=c.querySelector("h3")||c.querySelector(".row>b")||c.querySelector("b");
     const t=h?h.textContent.trim():"";if(!t)return null;if(!c.id)c.id=`card-${tab}-${i}`;return [c.id,t];}).filter(Boolean);
   box.innerHTML=heads.length>1?heads.map(([id,t])=>`<a data-go="${id}" title="${esc(t)}">${esc(t.length>34?t.slice(0,33)+"…":t)}</a>`).join(""):"";}
-function showTab(){document.querySelectorAll("nav button[data-t]").forEach(b=>b.classList.toggle("on",b.dataset.t===tab));document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="t-"+tab));
+// The address bar always holds the open view (tab, run, compared runs, experiment), so a copied link opens it.
+// A tab change is a new history entry (Back returns to the previous tab); everything else replaces the entry.
+const URLQ=new URLSearchParams(location.search);
+function syncURL(push){const p=new URLSearchParams();p.set("tab",tab);
+  if(RUN&&!$("follow").checked)p.set("run",(RUNS.find(r=>r.path===RUN)||{}).name||RUN);
+  else if(!RUN&&URLQ.get("run"))p.set("run",URLQ.get("run"));          // the linked run, before runs.json arrives
+  if(tab==="compare"&&cmpInit){p.set("a",$("cmpA").value);p.set("b",$("cmpB").value);}
+  if(tab==="bench"&&$("bench-exp").value){p.set("exp",$("bench-exp").value);if($("bench-fam").value)p.set("fam",$("bench-fam").value);}
+  const u=location.pathname+"?"+p;if(u===location.pathname+location.search)return;
+  try{history[push?"pushState":"replaceState"](null,"",u+location.hash);}catch(e){}}
+addEventListener("popstate",()=>{const q=new URLSearchParams(location.search).get("tab");if(q&&TAB_LABEL[q]&&q!==tab){tab=q;showTab();}});
+function showTab(push){document.querySelectorAll("nav button[data-t]").forEach(b=>b.classList.toggle("on",b.dataset.t===tab));document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="t-"+tab));
   const g=(NAV.find(([,ks])=>ks.includes(tab))||[""])[0];$("crumb").innerHTML=`${esc(g)} › <b>${esc(TAB_LABEL[tab]||tab)}</b>`;
   if(tab==="runs")runsTab(true);if(tab==="compare")compareTab(true);if(tab==="bench")benchTab(true);if(tab==="safety")safetyTab();if(tab==="reg")regCard();if(DATA)render();
   const on=document.querySelector(`nav button[data-t="${tab}"]`);if(on&&innerWidth<=900)on.scrollIntoView({inline:"center",block:"nearest"});
-  setTimeout(navToc,0);setTimeout(navToc,1500);}
+  setTimeout(navToc,0);setTimeout(navToc,1500);syncURL(push===true);}
 function resetCharts(){Object.values(charts).forEach(c=>c.destroy());charts={};["g-train","g-val","g-where","g-neurons","g-epochs","g-tasks","g-cmp","g-world","g-bench"].forEach(g=>$(g).innerHTML="");}
 $("theme").onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==="dark"?"light":(r.dataset.theme==="light"?"dark":(matchMedia("(prefers-color-scheme:dark)").matches?"light":"dark"));resetCharts();render();if(tab==="runs")runsTab(true);};
 $("xaxis").onchange=()=>{resetCharts();render();if(tab==="runs")runsTab(true);};
@@ -238,6 +249,8 @@ const fmt=(v,d=3)=>v==null||isNaN(v)?"–":(+v).toFixed(d);
 const pct=v=>v==null||isNaN(v)?"–":(100*v).toFixed(0)+"%";
 const esc=s=>String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 async function j(url){const r=await fetch(url+(url.includes("?")?"&":"?")+"t="+Date.now());if(!r.ok)throw new Error(url);return r.json();}
+// runs.json (this folder) after runs_archive.json (earlier runs rebuilt from job logs by scripts/import_logs.py)
+async function allRuns(){const [L,A]=await Promise.all([j("runs.json").catch(()=>null),j("runs_archive.json").catch(()=>[])]);if(!L&&!A.length)throw new Error("runs.json");return [...A,...(L||[])];}
 const X=()=>$("xaxis").value;
 const xv=r=>X()==="epoch"&&r.epoch!=null?r.epoch:r.step;
 const ncount=L=>Object.values(L.counts).reduce((a,b)=>a+b,0);
@@ -741,7 +754,7 @@ const CMP={"val balanced MRR":["evals","bal_MRR"],"val balanced MRR ÷ chance":[
 $("cmp-metric").innerHTML=Object.keys(CMP).map(k=>`<option>${k}</option>`).join("");$("cmp-metric").onchange=()=>runsTab(true);
 async function runsTab(force){
   const now=Date.now();if(!force&&now-lastRunsFetch<4000)return;lastRunsFetch=now;
-  try{RUNS=await j("runs.json");}catch(e){return;}
+  try{RUNS=await allRuns();}catch(e){return;}
   const got=await Promise.all(RUNS.map(r=>(r.path===RUN&&DATA)?Promise.resolve(DATA):j(r.path).catch(()=>null)));
   got.forEach((d,i)=>{if(d)ALL[RUNS[i].path]=d;});
   const ok=RUNS.map(r=>ALL[r.path]).filter(Boolean);
@@ -751,7 +764,7 @@ async function runsTab(force){
     const r=e.bal_MRR/(e.bal_chance||1);const verdict=e.bal_MRR==null?"–":r>2?'<span class="ok">learning</span>':r>1.3?'<span class="wa">weak</span>':(h.cos_pred_target>0.95?'<span class="no">shortcut (cos≈1, MRR≈chance)</span>':'<span class="no">at chance</span>');
     const prog=h.step!=null?Math.round(100*(h.step+1)/(d.steps_total||1)):0,stt=String(d.status).split(":")[0];
     return `<tr><td><a href="#" data-run="runs/${esc(d.name)}/live.json">${esc(d.name)}</a></td><td><span class="badge ${stt}">${esc(stt)}</span></td><td class="num">${prog}%</td><td class="num">${fmt(h.epoch,2)}${d.epochs_total?"/"+fmt(d.epochs_total,2):""}</td><td>${MODE_NAME[d.config.ku_mode]||"sections"}</td><td>${esc((d.schedule||{}).schedule||"")}${h.phase&&h.phase!=="mixed"?" · "+esc(h.phase):""}</td><td class="num">${d.config.n_subgraphs}</td><td class="num">${fmt(h.jepa,4)}</td><td class="num">${fmt(h.cos_pred_target,3)}</td><td class="num">${fmt(e.bal_MRR)}</td><td class="num">${fmt(e.bal_chance)}</td><td class="num">${fmt(e.probe_acc,2)}</td><td class="num">${pct(idp)}</td><td class="num">${nl?nl.pred_learned+"/"+nl.pred_n:"–"}</td><td class="num">${fmt(rb.MRR)}</td><td>${verdict}</td></tr>`;}).join("");
-  $("runs-table").querySelectorAll("a[data-run]").forEach(a=>a.onclick=ev=>{ev.preventDefault();$("follow").checked=false;selectRun(a.dataset.run);tab="overview";showTab();});
+  $("runs-table").querySelectorAll("a[data-run]").forEach(a=>a.onclick=ev=>{ev.preventDefault();$("follow").checked=false;selectRun(a.dataset.run);tab="overview";showTab(true);});
   ptTable(ok);epochMatrix(ok);taskMatrix(ok);
   const [src,key]=CMP[$("cmp-metric").value];
   const ds=ok.map((d,i)=>{let rows=d[src]||[];
@@ -862,14 +875,15 @@ async function v2Card(){
 async function benchTab(force){
   v2Card();
   const now=Date.now();if(!force&&now-lastRunsFetch<4000&&benchInit)return;lastRunsFetch=now;
-  try{RUNS=await j("runs.json");}catch(e){return;}
+  try{RUNS=await allRuns();}catch(e){return;}
   const got=await Promise.all(RUNS.map(r=>j(r.path).catch(()=>null)));got.forEach((d,i)=>{if(d)ALL[RUNS[i].path]=d;});
   const D=RUNS.map(r=>ALL[r.path]).filter(d=>d&&d.experiment&&d.experiment!=="single");
   const exps=[...new Set(D.map(d=>d.experiment))];
   if(!exps.length){$("bench-head").innerHTML='<div class="empty">No experiment runs yet. Set EXPERIMENTS = ["BENCH"] in the notebook.</div>';return;}
   const sel=$("bench-exp"),opts=exps.slice().reverse().map(e=>`<option>${esc(e)}</option>`).join("");
-  if(sel.dataset.o!==opts){const v=sel.value;sel.innerHTML=opts;sel.dataset.o=opts;sel.value=v&&exps.includes(v)?v:(exps.includes("BENCH")?"BENCH":exps[exps.length-1]);}
-  if(!benchInit){benchInit=true;sel.onchange=()=>{resetCharts();benchTab(true);};$("bench-fam").onchange=()=>{resetCharts();benchTab(true);};}
+  if(sel.dataset.o!==opts){const v=sel.value;sel.innerHTML=opts;sel.dataset.o=opts;const ue=!benchInit&&URLQ.get("exp");sel.value=v&&exps.includes(v)?v:ue&&exps.includes(ue)?ue:(exps.includes("BENCH")?"BENCH":exps[exps.length-1]);}
+  if(!benchInit){benchInit=true;const uf=URLQ.get("fam");if(uf&&[...$("bench-fam").options].some(o=>o.value===uf))$("bench-fam").value=uf;
+    sel.onchange=()=>{resetCharts();benchTab(true);syncURL();};$("bench-fam").onchange=()=>{resetCharts();benchTab(true);syncURL();};if(tab==="bench")syncURL();}
   const E=sel.value,FAM=$("bench-fam").value,runs=D.filter(d=>d.experiment===E),arms=[...new Set(runs.map(d=>d.arm))];
   const allRows=arms.map(a=>{const rs=runs.filter(d=>d.arm===a),fin=rs.filter(d=>String(d.status).startsWith("done"));
     const vals={};[...BCOLS,...RCOLS].forEach(([k,,f])=>vals[k]=mstd(fin.map(f)));
@@ -982,10 +996,11 @@ async function benchTab(force){
 const _ch=n=>{let s=0;for(let k=1;k<=Math.round(n);k++)s+=1/k;return s/Math.round(n);};
 
 // ---------------------------------------------------------------- compare two runs
-const MODE_NAME={section:"KUs (sections)",paper:"one KU per paper",paper_masked:"paper as one text"};
+const MODE_NAME={section:"KUs (sections)",paper:"one KU per paper",paper_masked:"paper as one text","graph-jepa":"Graph-JEPA"};
 let cmpInit=false;
+const runByName=n=>{const r=RUNS.find(x=>x.name===n);return r?ALL[r.path]:null;};
 function cmpPick(){   // default pair: newest experiment whose arms differ in ku_mode, else the two newest runs
-  const names=RUNS.map(r=>r.name),D=names.map(n=>ALL[`runs/${n}/live.json`]).filter(Boolean);
+  const names=RUNS.map(r=>r.name),D=names.map(runByName).filter(Boolean);
   for(let i=D.length-1;i>=0;i--){const d=D[i];if(!d.experiment||d.experiment==="single")continue;
     const mates=D.filter(o=>o.experiment===d.experiment&&o.seed===d.seed&&o.config.ku_mode!==d.config.ku_mode);
     if(mates.length){const a=d.config.ku_mode==="section"?d:mates.find(o=>o.config.ku_mode==="section")||mates[0],b=a===d?mates[0]:d;return [a.name,b.name];}}
@@ -1021,14 +1036,16 @@ function cmpWinner(a,b,kind){
 }
 async function compareTab(force){
   const now=Date.now();if(!force&&now-lastRunsFetch<4000&&cmpInit)return;lastRunsFetch=now;
-  try{RUNS=await j("runs.json");}catch(e){return;}
+  try{RUNS=await allRuns();}catch(e){return;}
   const got=await Promise.all(RUNS.map(r=>j(r.path).catch(()=>null)));got.forEach((d,i)=>{if(d)ALL[RUNS[i].path]=d;});
   const opts=RUNS.slice().reverse().map(r=>`<option value="${esc(r.name)}">${esc(r.name)}</option>`).join("");
   for(const id of ["cmpA","cmpB"])if($(id).dataset.o!==opts){const v=$(id).value;$(id).innerHTML=opts;$(id).dataset.o=opts;if(v)$(id).value=v;}
-  if(!cmpInit&&RUNS.length){const [a,b]=cmpPick();$("cmpA").value=a;$("cmpB").value=b;cmpInit=true;
-    $("cmpA").onchange=$("cmpB").onchange=$("cmpSrc").onchange=()=>{resetCharts();compareTab(true);};
-    $("cmpSwap").onclick=()=>{const a=$("cmpA").value;$("cmpA").value=$("cmpB").value;$("cmpB").value=a;resetCharts();compareTab(true);};}
-  const A=ALL[`runs/${$("cmpA").value}/live.json`],B=ALL[`runs/${$("cmpB").value}/live.json`];
+  if(!cmpInit&&RUNS.length){const [a,b]=cmpPick(),has=n=>n&&RUNS.some(r=>r.name===n);
+    $("cmpA").value=has(URLQ.get("a"))?URLQ.get("a"):a;$("cmpB").value=has(URLQ.get("b"))?URLQ.get("b"):b;cmpInit=true;
+    $("cmpA").onchange=$("cmpB").onchange=$("cmpSrc").onchange=()=>{resetCharts();compareTab(true);syncURL();};
+    $("cmpSwap").onclick=()=>{const a=$("cmpA").value;$("cmpA").value=$("cmpB").value;$("cmpB").value=a;resetCharts();compareTab(true);syncURL();};
+    if(tab==="compare")syncURL();}
+  const A=runByName($("cmpA").value),B=runByName($("cmpB").value);
   if(!A||!B){$("cmp-head").innerHTML='<div class="empty">Need at least one run.</div>';return;}
   const useTest=$("cmpSrc").value==="best"&&(A.final||{}).retrieval_balanced&&(B.final||{}).retrieval_balanced;
   const VA=cmpVals(A,useTest),VB=cmpVals(B,useTest),keys=[...new Set([...Object.keys(VA),...Object.keys(VB)])];
@@ -1073,18 +1090,19 @@ async function compareTab(force){
 }
 
 // ---------------------------------------------------------------- polling
-function selectRun(path){if(path===RUN)return;RUN=path;$("run").value=path;$("ex-type").innerHTML="";resetCharts();DATA=null;poll(true);}
+function selectRun(path){if(path===RUN)return;RUN=path;$("run").value=path;$("ex-type").innerHTML="";resetCharts();DATA=null;syncURL();poll(true);}
 $("run").onchange=()=>{$("follow").checked=false;selectRun($("run").value);};
+$("follow").addEventListener("change",()=>syncURL());
 async function refreshRuns(){
-  try{RUNS=await j("runs.json");}catch(e){return;}
+  try{RUNS=await allRuns();}catch(e){return;}
   const sel=$("run"),opts=RUNS.slice().reverse();
   const html=opts.map(r=>`<option value="${r.path}">${esc(r.name)}</option>`).join("");if(sel.innerHTML!==html)sel.innerHTML=html;
-  const want=(new URLSearchParams(location.search).get("run")||"").replace(/ /g,"+")||null;   // "+" in run names
+  const want=(URLQ.get("run")||"").replace(/ /g,"+")||null;   // "+" in run names
   let target=RUN;
-  if(!RUN&&want)target=`runs/${want}/live.json`;
+  if(!RUN&&want)target=(RUNS.find(r=>r.name===want)||{}).path||`runs/${want}/live.json`;
   if($("follow").checked&&opts.length)target=opts[0].path;              // newest run = the one training now
   if(!target&&opts.length)target=opts[0].path;
-  if(target&&target!==RUN){RUN=target;resetCharts();$("ex-type").innerHTML="";}
+  if(target&&target!==RUN){RUN=target;resetCharts();$("ex-type").innerHTML="";syncURL();}
   sel.value=RUN;
 }
 async function poll(force){

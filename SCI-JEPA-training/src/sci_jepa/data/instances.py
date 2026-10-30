@@ -54,6 +54,12 @@ N_PROBE_CLASSES = len(ROLE_RELS) + 1          # role relations + "no edge"
 PROBE_NONE = len(ROLE_RELS)
 
 
+# Neighbour scores cached per process (Sampler._scores), bounded so that
+# 16 batch workers x 4 training processes stay within RAM on the full arXiv split. The values are deterministic,
+# so clearing the cache changes only speed, never a batch.
+SCORE_CACHE_MAX = 20_000                 # ~30 KB per paper at 2M papers: ~0.6 GB per process
+
+
 class Sampler:
     """Draws anchors and neighbourhoods for one split."""
 
@@ -127,6 +133,8 @@ class Sampler:
             frontier = nxt
         out = (np.fromiter(score.keys(), dtype=np.int32, count=len(score)),
                np.fromiter(score.values(), dtype=np.float64, count=len(score)))
+        if len(self._score_cache) >= SCORE_CACHE_MAX:  # bounded: at 2M papers every batch worker's cache grew by
+            self._score_cache.clear()                  #   ~15 GB within an hour and OOM-killed job 38878
         self._score_cache[p0] = out
         return out
 
@@ -613,7 +621,7 @@ def collate_views(views, is_mask=None):
              "deg": _pad(views, "deg", T, 0, np.int64),
              "comp": _pad(views, "comp", T, -1, np.int64),
              "pad": torch.as_tensor(np.stack([np.arange(T) >= len(v["type"]) for v in views]))}
-    rel = np.zeros((len(views), T, T), dtype=np.int64)
+    rel = np.zeros((len(views), T, T), dtype=np.uint8)   # ids < 256: 8x less to copy; to_device widens them
     for b, v in enumerate(views):
         n = len(v["type"]); rel[b, :n, :n] = v["rel"]
     batch["rel"] = torch.as_tensor(rel)

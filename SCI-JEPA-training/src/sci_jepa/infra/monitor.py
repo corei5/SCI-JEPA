@@ -1,8 +1,11 @@
 """Live infrastructure monitor: one sample per second of the job's GPUs, CPU, memory and training progress.
 
-One Monitor runs per job (in the dashboard server process: pipeline --stage serve, or the single-process run).
+One Monitor runs per job: in the dashboard server process (pipeline --stage serve, or the single-process run), and
+in a job without a server, in one of its training processes (--stage shard). A lock per job keeps it to one.
 It writes
-    <results>/dashboard/infra/live.json   latest sample + the last `keep` samples (the dashboard's infra.html)
+    <results>/dashboard/infra/jobs/<cluster>-<job>.json   latest sample + the last `keep` samples (infra.html)
+    <results>/dashboard/infra/jobs.json   index of those files (the local page reads it; the hosted page lists
+                                          infra/jobs/ from its manifest, since every cluster pushes its own index)
     <results>/infra/<job>/timeseries.csv  every sample, for the report's timelines
     <results>/infra/<job>/system.json     sysinfo record of the job
 Training processes report their progress through write_progress() (called by train_one about every 5 s).
@@ -38,8 +41,17 @@ def write_progress(results_dir, run, **fields):
     """A training process's latest progress (tiny JSON, atomic). run: the run's name (dashboard name)."""
     safe = re.sub(r"[^A-Za-z0-9_.@=+-]", "_", run)
     _atomic({"run": run, "pid": os.getpid(), "time": time.time(), "job": os.environ.get("SLURM_JOB_ID"),
-             "shard": os.environ.get("SCI_JEPA_SHARD"), **fields},
+             "shard": os.environ.get("SCI_JEPA_SHARD"), "gpu": os.environ.get("CUDA_VISIBLE_DEVICES"), **fields},
             os.path.join(progress_dir(results_dir), f"{safe}.json"))
+
+
+def _alive(pid):
+    """The process still runs on this node (the monitor shares the node with the job's training processes)."""
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (TypeError, ValueError, ProcessLookupError, PermissionError):
+        return False
 
 
 def _slurm_end():
@@ -56,9 +68,12 @@ class Monitor(threading.Thread):
         super().__init__(daemon=True)
         self.results, self.interval, self.keep = results_dir, interval, keep
         self.job = os.environ.get("SLURM_JOB_ID") or f"local-{os.uname().nodename}-{os.getpid()}"
+        self.cluster = os.environ.get("SLURM_CLUSTER_NAME") or ("local" if self.job.startswith("local-") else "slurm")
         self.dir = os.path.join(results_dir, "infra", self.job)
-        # the dashboard server serves <results>/dashboard/: the live file goes there (infra.html polls it)
-        self.live = os.path.join(results_dir, "dashboard", "infra", "live.json")
+        # the dashboard server serves <results>/dashboard/: the live file goes there (infra.html polls it). One file
+        # per job, keyed by cluster too: jobs on several nodes or clusters push into one hosted folder
+        self.key = re.sub(r"[^A-Za-z0-9_.=+-]", "_", f"{self.cluster}-{self.job}")
+        self.live = os.path.join(results_dir, "dashboard", "infra", "jobs", f"{self.key}.json")
         os.makedirs(self.dir, exist_ok=True)
         self.system = sysinfo.collect(results_dir)
         sysinfo.write(self.system, os.path.join(self.dir, "system.json"))
@@ -160,8 +175,10 @@ class Monitor(threading.Thread):
                 r = json.load(open(f))
             except (OSError, json.JSONDecodeError):
                 continue
-            if r.get("job") == os.environ.get("SLURM_JOB_ID") and time.time() - r.get("time", 0) < 600:
-                rows.append(r)                         # this job's runs, reported in the last 10 minutes
+            if r.get("job") == os.environ.get("SLURM_JOB_ID") and r.get("status") != "done" and (
+                    time.time() - r.get("time", 0) < 600 or _alive(r.get("pid"))):
+                rows.append(r)       # this job's runs: reported in the last 10 minutes, or still running (a final
+                                     #   evaluation reports nothing for up to an hour)
         return sorted(rows, key=lambda r: str(r.get("shard")))
 
     def _runs(self):
@@ -208,14 +225,30 @@ class Monitor(threading.Thread):
 
     def brief(self):
         s = self.system
-        return {"job": self.job, "host": s["host"], "partition": s["slurm"].get("SLURM_JOB_PARTITION"),
+        return {"job": self.job, "cluster": self.cluster, "key": self.key, "host": s["host"], "partition": s["slurm"].get("SLURM_JOB_PARTITION"),
                 "time_limit": s["slurm"].get("TimeLimit"), "gpus": s["gpus"].get("nvidia_smi_L"),
                 "driver": s["gpus"].get("driver"), "cuda": s["torch"].get("cuda_build"),
                 "torch": s["torch"].get("torch"), "cpu": s["cpu"], "started": time.strftime(
                     "%Y-%m-%d %H:%M:%S", time.localtime(self.t_start))}
 
+    def _register(self):
+        """Add this job to dashboard/infra/jobs.json; entries whose file is gone or a week old are dropped."""
+        d = os.path.dirname(os.path.dirname(self.live))
+        p = os.path.join(d, "jobs.json")
+        try:
+            jobs = json.load(open(p))
+        except (OSError, json.JSONDecodeError):
+            jobs = []
+        def fresh(k):
+            try:
+                return time.time() - os.path.getmtime(os.path.join(d, "jobs", f"{k}.json")) < 7 * 86400
+            except OSError:
+                return False
+        _atomic([k for k in jobs if k != self.key and fresh(k)] + [self.key], p)
+
     def run(self):
         brief = self.brief()
+        registered = False
         while not self._stop.is_set():
             t = time.time()
             try:
@@ -224,6 +257,9 @@ class Monitor(threading.Thread):
                 self._csv(s)
                 _atomic({"system": brief, "now": s, "history": list(self.hist), "interval_s": self.interval},
                         self.live)
+                if not registered:                      # after the first write, so the index never names a missing file
+                    self._register()
+                    registered = True
             except Exception as e:                      # noqa: BLE001  (monitoring never stops a run)
                 print(f"[infra] sample failed: {e}", flush=True)
             self._stop.wait(max(0.05, self.interval - (time.time() - t)))
@@ -232,8 +268,34 @@ class Monitor(threading.Thread):
         self._stop.set()
 
 
+_LOCKS = []
+
+
+def _claim(results_dir):
+    """True when this process may monitor its job: it holds <results>/infra/<job>/.monitor.lock until it exits."""
+    try:
+        import fcntl
+    except ImportError:                                     # Windows: no shards
+        return True
+    job = os.environ.get("SLURM_JOB_ID") or f"local-{os.uname().nodename}-{os.getpid()}"
+    d = os.path.join(results_dir, "infra", job)
+    os.makedirs(d, exist_ok=True)
+    f = open(os.path.join(d, ".monitor.lock"), "a")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return False
+    _LOCKS.append(f)
+    return True
+
+
 def start(results_dir, interval=1.0):
-    """Start the monitor thread for this job; returns it (call .stop() at the end, or let the process exit)."""
+    """Start the monitor thread for this job; returns it (call .stop() at the end, or let the process exit).
+    None when another process of the job already monitors it (the server, or another shard)."""
+    if not _claim(results_dir):
+        print("[infra] another process monitors this job", flush=True)
+        return None
     m = Monitor(results_dir, interval)
     m.start()
     print(f"[infra] monitoring every {interval:g} s -> {m.dir} (live: {m.live})", flush=True)

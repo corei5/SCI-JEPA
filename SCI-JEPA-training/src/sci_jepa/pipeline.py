@@ -90,6 +90,12 @@ def parse_args():
     p.add_argument("--llm-models", nargs="*", default=os.environ.get("LLM_MODELS", "").replace(",", " ").split(),
                    help="LLM_MODELS: several LLM-Reasoning arms, one per Hugging Face model id (replaces --llm-model "
                         "in BENCH): e.g. Qwen/Qwen2.5-7B-Instruct mistralai/Mistral-7B-Instruct-v0.3")
+    p.add_argument("--arms", nargs="*", default=os.environ.get("ARMS", "").replace(",", " ").split(),
+                   help="ARMS: run only these arms of each experiment (e.g. reference jepa+rgat world_model motif "
+                        "motif+world); default: every arm")
+    p.add_argument("--live-evals", type=int, default=_env("LIVE_EVALS", 10),
+                   help="LIVE_EVALS: quick validation passes per run for the dashboard's curves (0 = none; the epoch-end "
+                        "validation that selects the best epoch always runs). Each costs minutes at 2M papers")
     # --- long runs: resume across jobs, live infrastructure monitor ---
     p.add_argument("--resume", type=int, choices=[0, 1], default=int(_bool("RESUME", False)),
                    help="RESUME: 1 = every training run checkpoints and a later job continues it (chained jobs)")
@@ -241,6 +247,15 @@ if A.stage in ("all", "serve"):
     if A.monitor_interval > 0:                           # GPUs / CPU / progress every second (dashboard: Infrastructure)
         from sci_jepa.infra.monitor import start as start_monitor
         MONITOR = start_monitor(str(OUT), A.monitor_interval)
+    # hosted dashboard from the job's first minute (KU graph build included), not only once a run trains; the
+    # shards' LiveRuns share the folder's .autopush.lock, so one process uploads
+    from sci_jepa.dashboard.push import start_autopush
+    start_autopush(DASH)
+elif A.stage == "shard" and A.monitor_interval > 0:
+    # every job reports on the Infrastructure page, also the jobs without a server that share another job's results
+    # folder (one per node / GPU type): the first shard of each job that gets its lock monitors it
+    from sci_jepa.infra.monitor import start as start_monitor
+    MONITOR = start_monitor(str(OUT), A.monitor_interval)
 if A.stage == "serve":                                     # runs until the job script stops it
     while True:
         heal_runs_index(DASH)
@@ -250,13 +265,17 @@ if A.stage == "serve":                                     # runs until the job 
 section("1. The ICML configuration")
 bad = [e for e in A.experiments if e not in PAPER_EXPERIMENTS]
 assert not bad, f"not an ICML experiment: {bad}; choose from {list(PAPER_EXPERIMENTS)}"
+_known = {t for e in A.experiments for t, _ in EXP_ARMS[e]}
+assert all(a in _known for a in A.arms), \
+    f"ARMS not in {A.experiments}: {[a for a in A.arms if a not in _known]}; choose from {sorted(_known)}"
 on_gpu = torch.cuda.is_available()
 cfg = PaperAConfig().override(**SIZES[A.size], max_papers=A.n_papers, split_dir=A.split_dir,
                               epochs=float(A.epochs), patience=A.patience,
                               seeds=list(A.seeds), device="auto", batch_size=64 if A.size in ("tiny", "local") else 128,
                               rows_per_shard=100 if A.n_papers <= 20000 else 500,
                               llm_model=A.llm_model, llm_allow_cpu=bool(A.llm_on_mac), llm_eval_instances=A.llm_queries,
-                              llm_models=tuple(A.llm_models), resume_runs=bool(A.resume), ckpt_every=A.ckpt_every,
+                              llm_models=tuple(A.llm_models), arms=tuple(A.arms),
+                              resume_runs=bool(A.resume), ckpt_every=A.ckpt_every,
                               field_balance=A.field_balance, field_alpha=A.field_alpha,
                               batch_workers=A.batch_workers,
                               **{"off": {}, "fast": FAST, "gpu": FAST_GPU, "fast+multi": FAST_MULTI}[A.speed])
@@ -277,7 +296,8 @@ print("splits:", S["splits"], "| fields:", S["fields"], "| subfields:", S["subfi
 print("in-corpus citations:", S["paper_edges_cites"], "| proxy grounded edges:", S["paper_edges_proxy"])
 from sci_jepa.training.train import mask_plan      # run length from the data: EPOCHS passes over every hidden KU
 n_steps, _, sched = mask_plan(cfg, Sampler(gi, cfg, "train", seed=0))
-cfg = cfg.override(steps=n_steps, log_every=max(n_steps // 50, 1), eval_every=max(n_steps // 10, 1),
+cfg = cfg.override(steps=n_steps, log_every=max(n_steps // 50, 1),
+                   eval_every=max(n_steps // A.live_evals, 1) if A.live_evals > 0 else 0,   # dashboard only
                    # warm-up: one epoch (at least 1,000 steps), at most 10% of the run
                    warmup=min(max(1000, int(n_steps / max(A.epochs, 1e-9))), max(n_steps // 10, 1)))
 print(f"at most {A.epochs} epochs over {sum(sched['anchors_per_type'].values())} hidden KUs = {n_steps} steps of {cfg.batch_size}"

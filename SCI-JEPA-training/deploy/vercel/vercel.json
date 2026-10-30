@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/runs/:path*", "destination": "/api/f?p=runs/:path*" },
+    { "source": "/graphs/:file((?!vendor/).*)", "destination": "/api/f?p=graphs/:file" },
+    { "source": "/infra/:path*", "destination": "/api/f?p=infra/:path*" },
+    { "source": "/cluster/:path*", "destination": "/api/f?p=cluster/:path*" },
+    { "source": "/:file([A-Za-z0-9_.-]+\\.json)", "destination": "/api/f?p=:file" }
+  ],
+  "headers": [
+    { "source": "/(.*)\\.html", "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }] },
+    { "source": "/(.*)", "headers": [{ "key": "X-Robots-Tag", "value": "noindex" }, { "key": "Referrer-Policy", "value": "same-origin" }] }
+  ]
+}

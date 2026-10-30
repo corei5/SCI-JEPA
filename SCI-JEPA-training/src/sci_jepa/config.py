@@ -73,6 +73,7 @@ class PaperAConfig:
     embed_model: str = "Alibaba-NLP/gte-modernbert-base"   # 8192-token context, 768-d
     embed_max_tokens: int = 2048       # longest KU ~1150 tokens (results); MiniLM's 256 cut 93% of methods
     embed_batch: int = 32              # texts per forward pass (long sections: keep small on a laptop)
+    embed_tokens: int = 8192           # padded tokens per forward pass (with embed_batch: the smaller limit wins)
     embed_prefix: str = ""             # some encoders want e.g. "search_document: "
     embed_chunk: int = 8192
     snippet_chars: int = 240           # KU text kept for the dashboard's example tables
@@ -135,6 +136,9 @@ class PaperAConfig:
     llm_models: tuple = ()             # several LLM-Reasoning arms, one per model (Hugging Face ids): BENCH's
                                        #   LLM-Reasoning arm becomes "LLM-Reasoning@<model name>" per entry;
                                        #   () = the single arm with llm_model (run_experiment.expand_llm_arms)
+    arms: tuple = ()                   # only these arm tags of each experiment (env ARMS, e.g. the full-corpus run's
+                                       #   trained arms); "LLM-Reasoning" also selects every LLM-Reasoning@<model>;
+                                       #   () = every arm (run_experiment.select_arms)
     # ---- long runs: resume a training run across jobs (train_one) ---------------
     resume_runs: bool = False          # True: every training run of run_experiment / the pipeline writes a
                                        #   checkpoint (model, optimizer, EMA target, sampler and RNG states,
@@ -209,6 +213,8 @@ class PaperAConfig:
                                        #   than batch_workers=0
     tf32: bool = False                 # TF32 matrix products on Ampere+ GPUs (fp32 parts of the model)
     fused_adamw: bool = False          # fused (single-kernel) AdamW on CUDA: same update
+    trainer: str = "native"            # native (train.py's own loop) | lightning (training/lightning_loop.py)
+    devices: int = 1                   # trainer=lightning: GPUs for ONE run (DDP; the global batch is split)
     targets_per_instance: int = 1      # >1: multi-target training (I-JEPA-style): besides the anchor, hide one
                                        #   KU in each of k-1 neighbouring papers (leak-safe masked, own target
                                        #   view). An epoch stays one pass of PREDICTED KUs, so a run has k x

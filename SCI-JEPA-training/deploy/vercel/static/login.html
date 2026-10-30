@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>SCI-JEPA sign in</title><link rel="stylesheet" href="/site.css">
+<style>main{max-width:380px;margin-top:12vh}form{display:grid;gap:10px}</style></head><body>
+<main class="card">
+ <h1 style="margin-bottom:6px">SCI-JEPA training dashboard</h1>
+ <p class="muted" style="margin-top:0">Team password, from the project lead.</p>
+ <form method="post" action="/api/login">
+  <input type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus required>
+  <input type="hidden" name="next" id="next">
+  <button class="primary" type="submit">Sign in</button>
+  <div id="err" style="color:var(--bad)"></div>
+ </form>
+</main>
+<script>
+const q=new URLSearchParams(location.search);
+document.getElementById("next").value=q.get("next")||"/";
+if(q.get("e"))document.getElementById("err").textContent="Wrong password.";
+</script></body></html>

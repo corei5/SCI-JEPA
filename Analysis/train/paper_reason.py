@@ -36,12 +36,12 @@ from torch_geometric.nn import SAGEConv, to_hetero
 import torch_geometric.transforms as T
 
 from core.data_utils.paper_graph import build_hetero_graph, ASPECTS
+from core.paths import papers_layout
 
-
-# ─────────────────────────────────────────────────────────────
-RAW_DIR    = "/nfs/home/rabbyg/JEPA/Graph-JEPA/dataset/papers/raw"
-CACHE_PATH = "/nfs/home/rabbyg/JEPA/Graph-JEPA/dataset/papers/processed/hetero_graphA.pt"
-CKPT_DIR   = "/nfs/home/rabbyg/JEPA/Graph-JEPA/checkpoints/reasoning"
+_PATHS = papers_layout()
+RAW_DIR    = _PATHS["raw"]
+CACHE_PATH = _PATHS["hetero"]
+CKPT_DIR   = _PATHS["ckpt"]
 DEVICE     = "cuda" if torch.cuda.is_available() else "cpu"
 
 HIDDEN     = 128

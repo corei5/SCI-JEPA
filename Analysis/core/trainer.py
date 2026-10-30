@@ -5,6 +5,7 @@ import time
 import numpy as np
 from core.log import config_logger
 from core.asam import ASAM
+from core.seeds import seeds_for
 from torch_geometric.loader import DataLoader
 from sklearn.model_selection import StratifiedKFold
 from sklearn.linear_model import Ridge, LogisticRegression
@@ -26,15 +27,16 @@ def set_seed(seed):
 
 def save_model(cfg, model, tag, extra=None):
     """Save a trained Graph-JEPA model checkpoint. Returns the saved path."""
-    ckpt_dir = os.path.join('checkpoints', str(cfg.dataset))
-    os.makedirs(ckpt_dir, exist_ok=True)
-    ckpt_path = os.path.join(ckpt_dir, f'graphjepa_{tag}.pt')
+    from core.paths import analysis_dir
+    ckpt_dir = analysis_dir() / "checkpoints" / str(cfg.dataset)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_path = ckpt_dir / f'graphjepa_{tag}.pt'
     payload = {'model': model.state_dict(), 'cfg': cfg}
     if extra is not None:
         payload.update(extra)
-    torch.save(payload, ckpt_path)
+    torch.save(payload, str(ckpt_path))
     print(f'>>> saved trained model to {ckpt_path}')
-    return ckpt_path
+    return str(ckpt_path)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -141,6 +143,29 @@ def collapse_diagnostics(X, y, n_clusters=None, tag=''):
     return metrics
 
 
+def summarize_collapse(diag_records):
+    """Print the label-free collapse verdict shared by the legacy and Lightning loops."""
+    if not diag_records:
+        return
+    cg = np.array([d.get('cluster_collapse_gap', np.nan) for d in diag_records])
+    lg = np.array([d.get('label_collapse_gap', np.nan) for d in diag_records])
+    corr = np.array([d.get('size_std_corr', np.nan) for d in diag_records])
+    ir = np.array([d.get('imbalance_ratio', np.nan) for d in diag_records])
+    print("\n" + "="*60)
+    print("IMBALANCE-INDUCED-COLLAPSE SUMMARY (label-free)")
+    print(f"  imbalance_ratio (mean)      : {np.nanmean(ir):.1f}")
+    print(f"  cluster_collapse_gap (mean) : {np.nanmean(cg):.4f}  "
+          f"(>0 => rare regions collapse more)")
+    print(f"  size~std corr (mean)        : {np.nanmean(corr):.3f}")
+    print(f"  label_collapse_gap (mean)   : {np.nanmean(lg):.4f}  "
+          f"(analysis-only cross-check)")
+    if np.nanmean(cg) > 0.02 and np.nanmean(corr) > 0.15:
+        print("  >>> VERDICT: phenomenon PRESENT — CB-VCR is well motivated. Proceed.")
+    else:
+        print("  >>> VERDICT: phenomenon WEAK — reconsider framing before writing method.")
+    print("="*60)
+
+
 # ★ helper: read the EMA warmup range from cfg if present, else use defaults.
 def _ema_range(cfg):
     lo = getattr(cfg.jepa, 'ema_momentum', 0.99)
@@ -149,11 +174,12 @@ def _ema_range(cfg):
 
 
 def run(cfg, create_dataset, create_model, train, test, evaluator=None):
-    if cfg.seed is not None:
-        seeds = [cfg.seed]
-        cfg.train.runs = 1
-    else:
-        seeds = [21, 42, 41, 95, 12, 35, 66, 85, 3, 1234]
+    if str(getattr(cfg.train, "backend", "lightning")) == "lightning":
+        from core.engine import run_lightning
+        return run_lightning(
+            cfg, create_dataset, create_model, train, test, evaluator, mode="split"
+        )
+    seeds = seeds_for(cfg, "split")
 
     writer, logger = config_logger(cfg)
 
@@ -183,11 +209,10 @@ def run(cfg, create_dataset, create_model, train, test, evaluator=None):
         else:
             sharp = False
             optimizer = torch.optim.Adam(
-                model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.wd)
+                model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.wd, **_fused(cfg, model))
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
                                                                factor=cfg.train.lr_decay,
-                                                               patience=cfg.train.lr_patience,
-                                                               verbose=True)
+                                                               patience=cfg.train.lr_patience)  # verbose= was removed in torch 2.7
 
         start_outer = time.time()
         per_epoch_time = []
@@ -303,6 +328,12 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
+def _fused(cfg, model):
+    """{'fused': True} when cfg.train.fused_optim is on and the model sits on CUDA."""
+    on = bool(getattr(cfg.train, 'fused_optim', False)) and torch.cuda.is_available()
+    return {'fused': True} if on and all(p.is_cuda for p in model.parameters()) else {}
+
+
 def k_fold(dataset, folds=10):
     skf = StratifiedKFold(folds, shuffle=True, random_state=12345)
     train_indices, test_indices = [], []
@@ -314,11 +345,12 @@ def k_fold(dataset, folds=10):
 
 
 def run_k_fold(cfg, create_dataset, create_model, train, test, evaluator=None, k=10):
-    if cfg.seed is not None:
-        seeds = [cfg.seed]
-        cfg.train.runs = 1
-    else:
-        seeds = [42, 21, 95, 12, 35]
+    if str(getattr(cfg.train, "backend", "lightning")) == "lightning":
+        from core.engine import run_lightning
+        return run_lightning(
+            cfg, create_dataset, create_model, train, test, evaluator, mode="kfold"
+        )
+    seeds = seeds_for(cfg, "kfold")
 
     writer, logger = config_logger(cfg)
     dataset, transform, transform_eval = create_dataset(cfg)
@@ -355,11 +387,10 @@ def run_k_fold(cfg, create_dataset, create_model, train, test, evaluator=None, k
             model = create_model(cfg).to(cfg.device)
 
             optimizer = torch.optim.Adam(
-                model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.wd)
+                model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.wd, **_fused(cfg, model))
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
                                                                    factor=cfg.train.lr_decay,
-                                                                   patience=cfg.train.lr_patience,
-                                                                   verbose=True)
+                                                                   patience=cfg.train.lr_patience)  # verbose= was removed in torch 2.7
 
             start_outer = time.time()
             per_epoch_time = []
@@ -485,24 +516,7 @@ def run_k_fold(cfg, create_dataset, create_model, train, test, evaluator=None, k
     print('Averages over runs (balanced_acc, bal_std, macro_f1, raw_acc):')
     print(run_metrics.mean(axis=0))
 
-    if diag_records:
-        cg = np.array([d.get('cluster_collapse_gap', np.nan) for d in diag_records])
-        lg = np.array([d.get('label_collapse_gap', np.nan) for d in diag_records])
-        corr = np.array([d.get('size_std_corr', np.nan) for d in diag_records])
-        ir = np.array([d.get('imbalance_ratio', np.nan) for d in diag_records])
-        print("\n" + "="*60)
-        print("IMBALANCE-INDUCED-COLLAPSE SUMMARY (label-free)")
-        print(f"  imbalance_ratio (mean)      : {np.nanmean(ir):.1f}")
-        print(f"  cluster_collapse_gap (mean) : {np.nanmean(cg):.4f}  "
-              f"(>0 => rare regions collapse more)")
-        print(f"  size~std corr (mean)        : {np.nanmean(corr):.3f}")
-        print(f"  label_collapse_gap (mean)   : {np.nanmean(lg):.4f}  "
-              f"(analysis-only cross-check)")
-        if np.nanmean(cg) > 0.02 and np.nanmean(corr) > 0.15:
-            print("  >>> VERDICT: phenomenon PRESENT — CB-VCR is well motivated. Proceed.")
-        else:
-            print("  >>> VERDICT: phenomenon WEAK — reconsider framing before writing method.")
-        print("="*60)
+    summarize_collapse(diag_records)
 
     print(f'\n>>> Best model (balanced_acc={best_overall_bal:.4f}) saved as '
           f'checkpoints/{cfg.dataset}/graphjepa_best.pt')

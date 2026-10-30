@@ -54,6 +54,34 @@ def _split_ids(gi, split):
     return np.concatenate([gi.paper_comps[int(p)] for p in gi.papers(split)]).astype(np.int64)
 
 
+# Claim-evidence pairs the consistency probe trains on. The full arXiv train split has ~10M; a probe of a few linear
+# weights does not need them, and every one costs an encoding in the encoder baselines (21M texts instead of
+# ~2.5M) and a row in a ~140 GB feature matrix. A fixed sample (seed 0), the same for every system and seed.
+PROBE_TRAIN_PAIRS = 100_000
+SUPERVISED_PASS = 2_000_000         # training instances per pass of the supervised regressor (~12 GB of X/Y)
+LLM_CONSISTENCY_PAIRS = 3_000       # test pairs the LLM judges (one prompt each); fixed sample, every seed the same
+
+
+def _sample_pairs(pairs, cap, balance=True):
+    """`pairs` if at most `cap`, else a fixed sample (seed 0) in the original order; balance: the rarer label is kept
+    whole up to half the cap, so a rare 'contradicts' class is not thinned further."""
+    if not cap or len(pairs) <= cap:
+        return pairs
+    rng = np.random.default_rng(0)
+    if not balance:
+        return [pairs[i] for i in sorted(rng.choice(len(pairs), cap, replace=False))]
+    lab = np.asarray([l for *_, l in pairs])
+    rare = int((lab == 1).sum() < (lab == 0).sum())
+    i_rare, i_common = np.flatnonzero(lab == rare), np.flatnonzero(lab != rare)
+    n_rare = min(len(i_rare), cap // 2)
+    pick = np.concatenate([rng.choice(i_rare, n_rare, replace=False), rng.choice(i_common, cap - n_rare, replace=False)])
+    return [pairs[i] for i in sorted(pick)]
+
+
+def _train_pairs(gi):
+    return _sample_pairs(_pairs(gi, gi.papers("train")), PROBE_TRAIN_PAIRS)
+
+
 def _pairs(gi, papers):
     allowed = set(int(p) for p in papers)
     s_rel, c_rel = REL_ID["supported_by"], REL_ID["challenged_by"]
@@ -102,7 +130,7 @@ def text_system(gi, split):
 
 
 def _needed_ids(gi, split):
-    tr = _pairs(gi, gi.papers("train"))
+    tr = _train_pairs(gi)
     return np.unique(np.concatenate([_split_ids(gi, split), np.asarray([a for a, _, _ in tr] + [b for _, b, _ in tr],
                                                                         dtype=np.int64)]))
 
@@ -137,7 +165,7 @@ def encoder_system(gi, cfg, split, name):
     model, pooling, max_tok, prefix = ENCODERS[name]
     texts, mp_texts = gi.texts()
     ids = _needed_ids(gi, split)
-    cache = os.path.join(cfg.index_dir, "baseline_features", f"{name}_chunked_{len(texts)}_{len(mp_texts)}_{split}.npz")
+    cache = os.path.join(cfg.index_dir, "baseline_features", f"{name}_chunked_{len(texts)}_{len(mp_texts)}_{split}_p{PROBE_TRAIN_PAIRS}.npz")
     if os.path.exists(cache):
         z = np.load(cache)
         ok = np.array_equal(z["ids"], ids)
@@ -257,7 +285,9 @@ class SupervisedSystem(DenseSystem):
             to = lambda a, dt=torch.float32: torch.as_tensor(np.asarray(a), dtype=dt, device=dev)
             return to(_unit(np.asarray(X) - mu)), to(_unit(np.asarray(Y) - mu)), to(T, torch.long)
         n_anchor = Sampler(gi, cfg, "train", seed).n_anchors()
-        per_pass = max(n_anchor, 512)
+        # one pass = every hidden KU (as the JEPA models), but at most SUPERVISED_PASS instances: the X/Y of a pass
+        # are built in host RAM (42.5M anchors at 2M papers = ~260 GB, which OOM-killed jobs 38502 / 38539)
+        per_pass = min(max(n_anchor, 512), SUPERVISED_PASS)
         Xv, Yv, Tv = data("val", min(max(len(gi.papers("val")) * 22, 512), 20000), seed + 7)
         opt = torch.optim.AdamW(self.net.parameters(), lr=1e-3, weight_decay=0.01)
         best, best_state, bad, self.passes = -1.0, None, 0, 0
@@ -493,7 +523,7 @@ class LLMSystem:
 
     # ---- consistency (zero-shot) and intervention
     def consistency(self, split):
-        pairs = _pairs(self.gi, self.gi.papers(split))
+        pairs = _sample_pairs(_pairs(self.gi, self.gi.papers(split)), LLM_CONSISTENCY_PAIRS, balance=False)
         if not pairs:
             return {"bal_acc": None, "n": 0}
         n = max(32, min(300, self.ctx_tokens // 3))
@@ -676,7 +706,7 @@ def _consistency_probe(gi, split, sys):
     """Support vs contradict from the system's frozen vectors: a supervised linear probe trained on
     the TRAIN split's claim-evidence pairs (class-balanced), scored on `split`."""
     from sklearn.linear_model import LogisticRegression
-    tr, te = _pairs(gi, gi.papers("train")), _pairs(gi, gi.papers(split))
+    tr, te = _train_pairs(gi), _pairs(gi, gi.papers(split))
     if not tr or not te or len({l for *_, l in tr}) < 2:
         return {"bal_acc": None, "n": 0}
     def feats(P):

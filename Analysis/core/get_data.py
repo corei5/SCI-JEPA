@@ -2,7 +2,8 @@
 import numpy as np
 import torch
 from torch_geometric.transforms import Compose, Constant
-from core.config import cfg, update_cfg
+from core.config import cfg, update_cfg, resolve_config
+from core.paths import data_root
 
 from torch_geometric.datasets import ZINC, TUDataset
 from core.data_utils.exp import PlanarSATPairsDataset
@@ -53,7 +54,7 @@ def create_dataset(cfg):
         exit() 
 
     if cfg.dataset == 'ZINC':
-        root = 'dataset/ZINC'
+        root = data_root(cfg, 'ZINC')
         train_dataset = ZINC(
             root, subset=True, split='train', pre_transform=pre_transform, transform=transform_train)
         val_dataset = ZINC(root, subset=True, split='val',
@@ -64,7 +65,7 @@ def create_dataset(cfg):
         if cfg.dataset not in ['PROTEINS', 'MUTAG', 'DD']:
             pre_transform = Compose([Constant(value=0, cat=False), pre_transform])
 
-        dataset = TUDataset(root='dataset/TUD', name=cfg.dataset, pre_transform=pre_transform)
+        dataset = TUDataset(root=data_root(cfg, 'TUD'), name=cfg.dataset, pre_transform=pre_transform)
 
         return dataset, transform_train, transform_eval
 
@@ -72,11 +73,11 @@ def create_dataset(cfg):
         # One paper -> one graph (a 'subgraph' of the conceptual large graph).
         # Same k-fold contract as the TU datasets: return the single dataset
         # plus the train/eval JEPA partition transforms built above.
-        dataset = PapersDataset('/nfs/home/rabbyg/JEPA/Graph-JEPA/dataset/papers', pre_transform=pre_transform)
+        dataset = PapersDataset(data_root(cfg, 'papers'), pre_transform=pre_transform)
         return dataset, transform_train, transform_eval
 
     elif cfg.dataset == 'exp-classify':
-        root = "dataset/EXP/"
+        root = data_root(cfg, 'EXP')
         dataset = PlanarSATPairsDataset(root, pre_transform=pre_transform)
         return dataset, transform_train, transform_eval
 
@@ -96,7 +97,7 @@ def create_dataset(cfg):
 if __name__ == '__main__':
     print("Generating data")
 
-    cfg.merge_from_file('train/configs/zinc.yaml')
+    cfg.merge_from_file(resolve_config('train/configs/zinc.yaml'))
     cfg = update_cfg(cfg)
     cfg.metis.n_patches = 0
     train_dataset, val_dataset, test_dataset = create_dataset(cfg)

@@ -10,6 +10,7 @@ train:
   lr_patience: 20
   epochs: 30
   batch_size: 128
+  smooth_l1_beta: 1.0
 metis:
   n_patches: 32
 pos_enc:
