@@ -7,6 +7,8 @@ import { fileKey, redis, typeOf, validPath } from "../lib/store.js";
 export async function GET(req: Request) {
   const q = new URL(req.url).searchParams;
   const p = q.get("p");
+  // /d/<folder> without the slash (vercel.json sends it here): the folder's dashboard is /d/<folder>/
+  if (p && /^d\/[A-Za-z0-9_.@=+\-]+$/.test(p)) return Response.redirect(new URL(`/${p}/`, req.url), 302);
   if (!validPath(p)) return new Response("bad path", { status: 400 });
   const b64 = await redis.get<string>(fileKey(p));
   if (!b64) return new Response("not synced yet", { status: 404, headers: { "Cache-Control": "no-store" } });

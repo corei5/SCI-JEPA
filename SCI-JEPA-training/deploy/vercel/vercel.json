@@ -1,6 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
+    { "source": "/d/:folder/", "destination": "/index.html" },
+    { "source": "/d/:folder/index.html", "destination": "/index.html" },
+    { "source": "/d/:folder/infra.html", "destination": "/infra.html" },
+    { "source": "/d/:folder/vendor/:path*", "destination": "/vendor/:path*" },
+    { "source": "/d/:folder/graphs/vendor/:path*", "destination": "/graphs/vendor/:path*" },
+    { "source": "/d/:path*", "destination": "/api/f?p=d/:path*" },
     { "source": "/runs/:path*", "destination": "/api/f?p=runs/:path*" },
     { "source": "/graphs/:file((?!vendor/).*)", "destination": "/api/f?p=graphs/:file" },
     { "source": "/infra/:path*", "destination": "/api/f?p=infra/:path*" },

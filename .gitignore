@@ -8,6 +8,7 @@ __pycache__/
 .ipynb_checkpoints/
 dist/
 build/
+/SCI-JEPA-training/scaling/report/
 
 # OS and editors
 .DS_Store

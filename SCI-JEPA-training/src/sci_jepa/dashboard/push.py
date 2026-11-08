@@ -22,6 +22,12 @@ Each round it re-reads only files whose size or mtime changed, gzips them, and u
 content changed. `history` in runs/*/live.json and archive/*/live.json is thinned to at most --max-history
 rows (the last row is always kept) to stay inside the free Upstash/Vercel limits; the local files are never
 modified. It also pushes `squeue` output as cluster/squeue.json for the Queue page.
+
+Every results folder has its own place on the site. A dashboard folder <results>/dashboard is pushed under
+d/<results>/ (e.g. d/arxiv_full_M_e2/runs.json) and shown at <site>/d/<results>/, so runs with the same name in
+different folders (S, M, 2-epoch runs) no longer overwrite each other. --folder / SCIJEPA_PUSH_FOLDER sets
+another name; "." pushes to the top level, as before 7 Nov 2026 (archives from import_logs.py, which have no
+runs.json, always go to the top level). --prune only deletes inside the folder's own place.
 """
 import argparse
 import base64
@@ -45,6 +51,7 @@ SKIP_DIRS = {"vendor"}
 BATCH_B64 = 3_500_000                                # Vercel function request bodies max out at 4.5 MB
 MAX_RAW = 64 * 1024 * 1024
 KEEP_REMOTE = ("__", "cluster/", "archive/", "runs_archive.json")   # --prune never deletes these (import_logs.py)
+FOLDER_PREFIX = "d/"                                  # d/<results folder>/... on the site
 SQUEUE_FIELDS = ("id", "name", "user", "state", "elapsed", "limit", "nodes", "reason", "partition")
 SQUEUE_FORMAT = "%i|%j|%u|%T|%M|%l|%D|%R|%P"
 
@@ -59,6 +66,27 @@ def wanted(rel):
         return False
     return (rel.endswith(".json") or (parts[0] == "graphs" and rel.endswith(".html"))
             or (parts[0] == "governance" and len(parts) == 2))   # documents linked from the Regulation tab
+
+
+def folder_prefix(root, folder=None):
+    """Where `root` goes on the site: "d/<name>/" or "" (the top level).
+    folder (else SCIJEPA_PUSH_FOLDER) names it; "." means the top level. Without one, a dashboard folder (it has a
+    runs.json) is named after its results folder (<results>/dashboard -> <results>), and anything else, such as
+    an import_logs.py archive, goes to the top level."""
+    if folder is None:
+        folder = os.environ.get("SCIJEPA_PUSH_FOLDER")
+    if folder is None:
+        if not os.path.exists(os.path.join(root, "runs.json")):
+            return ""
+        a = os.path.abspath(root)
+        folder = os.path.basename(os.path.dirname(a) if os.path.basename(a) == "dashboard" else a)
+    folder = folder.strip().strip("/")
+    if folder in ("", "."):
+        return ""
+    clean = "".join(c if c.isalnum() or c in "_.@=+-" else "_" for c in folder).lstrip(".")
+    if not clean:
+        raise ValueError("unusable folder name for the site: %r" % folder)
+    return FOLDER_PREFIX + clean + "/"
 
 
 def walk(root):
@@ -159,17 +187,19 @@ class Pusher:
             self._call("POST", {"files": batch, "deleted": list(deleted)})
 
 
-def one_round(root, pusher, remote, stat_cache, opts):
-    """Push what changed since the last round. remote: path -> version known to be on the server."""
+def one_round(root, pusher, remote, stat_cache, opts, prefix=""):
+    """Push what changed since the last round. remote: site path -> version known to be on the server.
+    prefix: where this folder goes on the site (folder_prefix); local file rel is stored at prefix + rel."""
     out, seen = [], set()
     for rel, full in walk(root):
-        seen.add(rel)
+        key_rel = prefix + rel
+        seen.add(key_rel)
         try:
             st = os.stat(full)
         except OSError:
             continue
         key = (st.st_mtime_ns, st.st_size)
-        if stat_cache.get(rel) == key or st.st_size > MAX_RAW:
+        if stat_cache.get(key_rel) == key or st.st_size > MAX_RAW:
             continue
         try:
             with open(full, "rb") as f:
@@ -179,20 +209,22 @@ def one_round(root, pusher, remote, stat_cache, opts):
         if body is None:
             continue
         v, b64 = encode(body)
-        stat_cache[rel] = key
-        if remote.get(rel) == v:
+        stat_cache[key_rel] = key
+        if remote.get(key_rel) == v:
             continue
         if len(b64) > BATCH_B64:
             log("skip %s: %.1f MB compressed is over the upload limit (lower --max-history?)" % (rel, len(b64) / 1e6))
             continue
-        out.append((rel, v, b64))
+        out.append((key_rel, v, b64))
     if opts.squeue and shutil.which("squeue"):
         v, b64 = encode(json.dumps(squeue_snapshot(opts.squeue_args), separators=(",", ":")).encode())
         if remote.get("cluster/squeue.json") != v:
             out.append(("cluster/squeue.json", v, b64))
     deleted = []
     if opts.prune:
-        deleted = sorted(p for p in remote if not p.startswith(KEEP_REMOTE) and p not in seen)
+        # only inside this folder's own place: never another results folder's files or the top level's
+        mine = (lambda p: p.startswith(prefix)) if prefix else (lambda p: not p.startswith(FOLDER_PREFIX))
+        deleted = sorted(p for p in remote if mine(p) and not p.startswith(KEEP_REMOTE) and p not in seen)
     if out or deleted:
         pusher.push(out, deleted)
         for p, v, _ in out:
@@ -208,6 +240,7 @@ class _AutoPush:
 
     def __init__(self, root, url, token, every):
         self.root, self.every = root, every
+        self.prefix = folder_prefix(root)
         self.opts = argparse.Namespace(max_history=int(os.environ.get("SCIJEPA_PUSH_MAX_HISTORY", 1500)),
                                        squeue=False, squeue_args="", prune=False)
         self.pusher, self.remote, self.stat_cache = Pusher(url, token, timeout=30), None, {}
@@ -238,7 +271,7 @@ class _AutoPush:
                 return
             if self.remote is None:
                 self.remote = {k: v for k, v in self.pusher.manifest().items() if not k.startswith("__")}
-            one_round(self.root, self.pusher, self.remote, self.stat_cache, self.opts)
+            one_round(self.root, self.pusher, self.remote, self.stat_cache, self.opts, self.prefix)
 
     def _loop(self):
         while not self.stop.is_set():
@@ -277,7 +310,7 @@ def start_autopush(root):
         if len(_AUTO) == 1:
             import atexit
             atexit.register(lambda: [a.final() for a in _AUTO.values()])
-        log("[autopush] %s -> %s" % (key, url))
+        log("[autopush] %s -> %s/%s" % (key, url, _AUTO[key].prefix))
     return _AUTO[key]
 
 
@@ -292,7 +325,11 @@ def main(argv=None):
     ap.add_argument("--max-history", type=int, default=1500, help="rows of live.json history to keep (0 = all)")
     ap.add_argument("--squeue-args", default="-u " + getpass.getuser(), help='squeue filter (default "-u $USER")')
     ap.add_argument("--no-squeue", dest="squeue", action="store_false", help="do not push the SLURM queue")
-    ap.add_argument("--prune", action="store_true", help="also delete hosted files that no longer exist locally")
+    ap.add_argument("--prune", action="store_true",
+                    help="also delete hosted files of this folder that no longer exist locally")
+    ap.add_argument("--folder", default=None,
+                    help='name on the site, shown at <site>/d/<name>/ (default: the results folder\'s name; env '
+                         'SCIJEPA_PUSH_FOLDER; "." = the top level)')
     opts = ap.parse_args(argv)
     token = os.environ.get("SCIJEPA_PUSH_TOKEN")
     if not opts.url or not token:
@@ -300,13 +337,15 @@ def main(argv=None):
     if not os.path.isdir(opts.root):
         ap.error("not a folder: %s" % opts.root)
 
+    prefix = folder_prefix(opts.root, opts.folder)
     pusher = Pusher(opts.url, token)
     remote = {k: v for k, v in pusher.manifest().items() if not k.startswith("__")}
-    log("pushing %s -> %s (%d files already hosted, every %gs)" % (os.path.abspath(opts.root), opts.url, len(remote), opts.every))
+    log("pushing %s -> %s/%s (%d files already hosted, every %gs)"
+        % (os.path.abspath(opts.root), opts.url.rstrip("/"), prefix, len(remote), opts.every))
     stat_cache, failures, idle = {}, 0, 0
     while True:
         try:
-            sent, deleted = one_round(opts.root, pusher, remote, stat_cache, opts)
+            sent, deleted = one_round(opts.root, pusher, remote, stat_cache, opts, prefix)
             if sent or deleted:
                 kb = sum(len(b) for _, _, b in sent) / 1024
                 log("pushed %d file(s), %.0f KB%s" % (len(sent), kb, ", deleted %d" % len(deleted) if deleted else ""))

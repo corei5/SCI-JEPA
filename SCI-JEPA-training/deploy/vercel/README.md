@@ -33,6 +33,27 @@ In the browser, `static/hosted.js` answers the unchanged pages' `fetch("runs.jso
 serves repeated polls and Redis is read about once per version. This keeps usage inside the free plans.
 Long `history` arrays in `live.json` are thinned to 1,500 rows before upload; local files are never changed.
 
+## Results folders
+
+Every results folder has its own place on the site, so runs with the same name in different folders (S and M model
+sizes, 2-epoch runs) no longer overwrite each other. A dashboard folder `<results>/dashboard` is pushed under
+`d/<results>/` and shown at `https://scijepa-dashboard.vercel.app/d/<results>/` (for example
+`/d/arxiv_full_M_e2/`). The menu next to the site links switches folders. `/` opens the folder viewed last, else
+`arxiv_full_S` (`DEFAULT_FOLDERS` in `static/hosted.js`).
+
+- The folder name comes from the results folder. `--folder <name>` or `SCIJEPA_PUSH_FOLDER` sets another, and
+  `"."` pushes to the top level. Archives from `import_logs.py` have no `runs.json` and always go to the top level.
+- Extra-epoch folders `<base>_e<N>` (e.g. `arxiv_full_M_e2`) hold N-epoch reruns under the same run names. The
+  pages of `<base>` and `<base>_e<N>` both show the runs of both folders: `hosted.js` merges their `runs.json`
+  and renames the N-epoch runs to `<arm> (N ep)`, so they are their own arm in the Benchmark and All runs tabs.
+- `cluster/`, `archive/` and `runs_archive.json` exist once and are shown in every folder.
+- `--prune` deletes only inside the folder's own place, never another folder or the top level.
+- **The top level** holds everything pushed before 7 Nov 2026, when every folder still pushed there. S and M runs
+  with the same names overwrote each other there, so it mixes them. It is kept, under "top level" in the menu. A
+  full copy taken before the change is in `/nfs/home/alastia/SCI-JEPA-data/dashboard_backup_20261107/`.
+- Jobs started before the change still push to the top level. Push their folders by hand meanwhile:
+  `python3 scripts/push_dashboard.py <results>/dashboard --until-idle`.
+
 ## Credentials
 
 ```bash

@@ -104,6 +104,7 @@ def test_autopush_needs_credentials(tmp_path, monkeypatch):
 
 
 def test_autopush_round_and_leader_lock(tmp_path, monkeypatch):
+    monkeypatch.delenv("SCIJEPA_PUSH_FOLDER", raising=False)
     root = _dash(tmp_path)
     monkeypatch.setattr(pd.threading, "Thread", lambda **k: SimpleNamespace(start=lambda: None))
     a, b = pd._AutoPush(str(root), "https://x.invalid", "t", 30), pd._AutoPush(str(root), "https://x.invalid", "t", 30)
@@ -111,6 +112,36 @@ def test_autopush_round_and_leader_lock(tmp_path, monkeypatch):
         ap.pusher = FakePusher()
         ap.pusher.manifest = lambda: {"__synced": "now"}
     a.round()
-    assert {p for p, _, _ in a.pusher.calls[0][0]} == {"graphs/codebase.html", "runs.json", "runs/r1/live.json"}
+    pre = "d/%s/" % root.name                                   # the dashboard has a runs.json: its own folder
+    assert {p for p, _, _ in a.pusher.calls[0][0]} == {pre + "graphs/codebase.html", pre + "runs.json",
+                                                         pre + "runs/r1/live.json"}
     b.round()                                                   # a holds .autopush.lock: b stays quiet
     assert not b.pusher.calls
+
+
+def test_folder_prefix(tmp_path, monkeypatch):
+    monkeypatch.delenv("SCIJEPA_PUSH_FOLDER", raising=False)
+    dash = tmp_path / "arxiv_full_M_e2" / "dashboard"
+    dash.mkdir(parents=True)
+    assert pd.folder_prefix(str(dash)) == ""                    # no runs.json (an import_logs archive): top level
+    (dash / "runs.json").write_text("[]")
+    assert pd.folder_prefix(str(dash)) == "d/arxiv_full_M_e2/"   # <results>/dashboard -> d/<results>/
+    assert pd.folder_prefix(str(dash), ".") == ""
+    assert pd.folder_prefix(str(dash), "my run/x") == "d/my_run_x/"
+    monkeypatch.setenv("SCIJEPA_PUSH_FOLDER", "other")
+    assert pd.folder_prefix(str(dash)) == "d/other/"
+
+
+def test_folders_do_not_collide_and_prune_stays_inside(tmp_path):
+    root = _dash(tmp_path)
+    remote = {}
+    sent, _ = pd.one_round(str(root), FakePusher(), remote, {}, OPTS, "d/S/")
+    assert {p for p, _, _ in sent} == {"d/S/graphs/codebase.html", "d/S/runs.json", "d/S/runs/r1/live.json"}
+    sent, _ = pd.one_round(str(root), FakePusher(), remote, {}, OPTS, "d/M/")   # same names, another folder
+    assert {p for p, _, _ in sent} == {"d/M/graphs/codebase.html", "d/M/runs.json", "d/M/runs/r1/live.json"}
+    remote.update({"d/S/runs/gone/live.json": "0c", "runs/old/live.json": "0d", "cluster/squeue.json": "0e"})
+    prune = SimpleNamespace(**{**vars(OPTS), "prune": True})
+    _, deleted = pd.one_round(str(root), FakePusher(), dict(remote), {}, prune, "d/S/")
+    assert deleted == ["d/S/runs/gone/live.json"]               # never d/M/, the top level or cluster/
+    _, deleted = pd.one_round(str(root), FakePusher(), dict(remote), {}, prune, "")
+    assert deleted == ["runs/old/live.json"]                    # the top level never prunes the folders
