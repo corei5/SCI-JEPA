@@ -71,6 +71,7 @@ The `sci-jepa` command dispatches to the package's tools (`src/sci_jepa/cli.py`)
 | `sci-jepa evaluate` | `evaluate.py` | evaluate a saved model, a comparison system, or a finished experiment |
 | `sci-jepa validity` | `evaluation/validity.py` | counterfactual audit, faithfulness, annotation export / agreement |
 | `sci-jepa findings` | `evaluation/findings.py` | pre-registered hypotheses H1–H5 for a finished experiment |
+| `sci-jepa safety` | `evaluation/safety.py` | safety and reliability checks (§9.5) |
 | `sci-jepa figures` | `reporting/figures.py` | paper figures and leaderboard tables |
 | `sci-jepa report` | `reporting/report_pdf.py` | PDF report of a finished experiment |
 | `sci-jepa serve` | `dashboard/serve.py` | serve a results folder's dashboard locally |
@@ -172,7 +173,7 @@ All settings live in one dataclass, `PaperAConfig` (`config.py`). Every experime
 | Speed | `amp` (`off` · `fp16` · `bf16`), `attn_impl` (`manual` · `sdpa`), `prefetch`, `batch_workers`, `tf32`, `fused_adamw` |
 | Evaluation | `eval_instances` (4000), `balanced_k` (100 candidates), `pool_mode` (`topic`), `minimal_pairs`, `mp_filter`, `sim_threshold` (0.80), `task_eval_instances` (300), `primary_average` (`macro`) |
 | Comparison systems | `baseline` (`text` · `bm25` · `scincl` · `bge-m3` · `supervised` · `llm`), `llm_model`, `llm_models`, `llm_eval_instances` |
-| Resume | `resume_runs`, `ckpt_every` (2000 steps) |
+| Resume | `resume_runs`, `ckpt_every` (2000 steps), `keep_ckpts` (kept weights, see below) |
 | Paths | `index_dir`, `out_dir`, `model_dir` (from environment variables, below) |
 
 ### 5.2 Presets
@@ -196,6 +197,7 @@ All settings live in one dataclass, `PaperAConfig` (`config.py`). Every experime
 | `SPEED`, `BATCH_WORKERS` | speed preset, batch-building processes per training process |
 | `LLM_MODELS`, `LLM_QUERIES` | LLM-Reasoning models (comma-separated Hugging Face ids), queries per task |
 | `RESUME`, `CKPT_EVERY` | resume from checkpoints, checkpoint interval in steps |
+| `KEEP_CKPTS` | weights kept at this many evenly spaced steps of every training run, in its model folder under `checkpoints/` (default 10; 0 = none) |
 | `STAGE`, `SHARD` | pipeline stage (`all`, `build`, `shard`, `merge`, `serve`), shard `i/n` |
 | `MONITOR_INTERVAL` | seconds between infrastructure samples (0 = off) |
 | `SKIP_SINGLE`, `SKIP_VALIDITY`, `SKIP_INFERENCE` | skip optional pipeline sections |
@@ -239,13 +241,20 @@ Makes the stored split once (`sci-jepa split`). Steps: year and domain from meta
 | `comp_type`, `comp_paper` | KU type id and paper id per KU |
 | `paper_comps` | KUs of each paper |
 | `paper_nbrs` | `paper → {paper: link weight}` (citations, proxy links) |
+| `comp_quantitative`, `comp_cites_figure`, `comp_challenged` | KU flags |
 | `paper_field`, `paper_subfield`, `paper_domain`, `paper_year` | metadata per paper |
 | `field_papers`, `subfield_papers` | papers per field / subfield |
 | `train_papers`, `val_papers`, `test_papers` | the split; `gi.papers(split)` |
 | `mp_x`, `mp_comp`, `mp_kind`, `mp_of` | counterfactual edits and their source KU |
 | `role_src`, `role_dst`, `role_rel` | typed role edges |
+| `comp_edges`, `children`, `parents`, `cites_pairs` | KU → `[(KU, relation)]`, claim ↔ evidence / implications, citation pairs |
+| `comp_snippet` | the first `snippet_chars` characters of each KU text (dashboard tables) |
 
 `get_index(cfg)` loads the cached blob for the configuration's fingerprint, or builds and saves it. Full KU texts are kept in a side file (`*.texts.pkl`) for BM25 and the text-based comparison systems.
+
+**Layout for large corpora.** `paper_comps`, `comp_edges`, `children`, `parents`, `paper_nbrs` and `cites_pairs` are CSR arrays (`LOOKUP_KEYS`: where each node's entries start, then the entries in the order the former dicts held them), wrapped in small objects that answer like those dicts (`.get(k, default)`, `d[k]`, `in`). `comp_snippet` is one UTF-8 byte array plus offsets. These arrays, the per-KU and per-edge arrays (`SHARED_KEYS`) and the vectors (`MMAP_KEYS`) are saved as `.npy` files next to the `.pt` and opened memory-mapped, so all processes on a node share one copy. The old dicts cost about 0.4 GB per million KUs in every process, rebuilt by every training rank and slowly copied by forked batch workers. Results are bit-identical (`tests/test_index_scale.py`). An index saved by an earlier version still loads: its lookups are built and saved next to it on first load. `python -m sci_jepa.data.graph_index --mmap <index.pt>` converts the rest.
+
+The build streams to disk (`build_blob(cfg, spill=...)`): vectors are appended to a `.npy` file (`_NpySpill`), snippets and full texts to byte files (`_StrSpill`), and the integer columns are kept in compact arrays. Previously the vectors were held in RAM twice (the chunks plus a concatenated copy, ~300 GB at 100M KUs). `_topic_donors` scores evaluation splits larger than `DONOR_DENSE_MAX` (65,536 papers) in row blocks rather than one n × n matrix. `build_proxy_edges` halves its 1,024-row block only when the block would not fit in free GPU memory. Both keep the old computation wherever it already ran.
 
 ### 6.5 `data/instances.py`
 
@@ -397,12 +406,77 @@ Each system implements the same interface as the trained model (encode visible c
 * `worldview.py`: structure reliance (accuracy with vs without typed edges), action response (direction of change after swap / flip), explained example subgraphs for the dashboard.
 * `neurons.py`: per-neuron labels (identity, type, field, leak, content, dead) for the dashboard's Neurons tab.
 
+### 9.5 Safety and reliability: `evaluation/safety.py`
+
+`sci-jepa safety <results folder> [--exp BENCH] [--models] [--n 300]` writes `<exp>/safety.json`, `<exp>/safety.md` and `dashboard/safety.json` (the dashboard's **Safety** tab). Each check is flagged pass / warn / fail against fixed limits (`LIMITS`).
+
+| Check | Source | What it detects |
+|---|---|---|
+| robustness, per edit kind | result files, every system | fooled by meaning-reversing edits (direction, negation, number, substitution) |
+| worst-domain gap | result files | a research field that gets much worse answers |
+| label gap | result files | a supports / contradicts judgement that mostly answers one way |
+| identity probe | result files, JEPA models | the paper-identity shortcut |
+| structure reliance | result files, JEPA models | accuracy lost without typed edges (≈ 0: the graph is not used) |
+| false accept | result files, JEPA models | the 0.80 similarity rule passes wrong candidates |
+| later papers | result files | drop on papers after the encoders' cutoff (n/a when every test paper is later) |
+| calibration (ECE, Brier, reliability) | `--models` (GPU) | over- or under-confident supports / contradicts probabilities |
+| selective prediction | `--models` | Hits@1 on all queries vs the most confident 40 % |
+| paraphrase invariance | `--models` | a meaning-preserving rewording keeps its rank, and is preferred over a meaning-reversing edit |
+
+| context injection, context use | `--models` | a wrong candidate planted in the paper's own visible KUs or in a neighbour outranks the truth (vs an unrelated-text control); how much the prediction changes without the neighbours |
+
+Not yet automated: an out-of-distribution test on PubMed, and the expert annotation (`sci-jepa validity export`). The report also carries the intended use and known weaknesses for the model card.
+
+**Risk card (`CARD`).** The model ranks findings and judges evidence; it writes no text and takes no actions, so the risks of chat assistants (harmful text, refusal jailbreaks, deception, sandbagging) cannot occur and are not scored. The checks are grouped into eight risk areas of an AI-for-science model, each with the question a scientist would ask, how it is measured, and the standard it follows (NIST AI RMF 1.0 trustworthiness characteristics, HELM metric types, and the method behind each check). Every metric carries a 95 % interval (bootstrap over test queries; Wilson when only totals are stored).
+
+| Area | Question | Checks |
+|---|---|---|
+| R1 Trustworthy training data | Are the KUs true to their papers, free of retracted work and test leakage? | KU faithfulness (MiniCheck), retracted / withdrawn papers, contamination |
+| R2 Robustness to wrong or manipulated science | Does the true finding beat reversed, fabricated, overclaimed or planted copies? | meaning-reversing edits, fabricated results, overclaiming, a wrong answer planted in the paper's own KUs (vs an unrelated-text control) |
+| R3 Stable meaning | Same answer when only the wording changes? | paraphrase keeps its rank; paraphrase beats a reversed edit |
+| R4 Honest confidence | Is it right when it is sure? | top-1 error, ECE, selective prediction gain, wrong-when-answering, false accepts |
+| R5 Unbiased scientific judgement | Does it favour agreeing evidence, expected results or famous work? | contradiction judged as support (and the reverse), novelty penalty, citation bias |
+| R6 Equal quality across science | Equally good for every field, small communities, high-stakes domains, new papers? | weakest-domain gap, small-subfield gap, bio / med / chem gap, 2026 vs 2025 |
+| R7 Reasons the way it claims | Does it use the graph and related papers, or a shortcut? | paper-identity probe, structure reliance, context use (prediction change when every neighbour is removed) |
+| R8 Misuse potential | Hazardous knowledge in the data, extra skill on it? | WMDP-based share of the data, hazard-topic uplift |
+
+**Science-specific checks: `evaluation/science_safety.py`.** `sci-jepa science-safety <results folder> [--n 300] [--n-llm 150]` (GPU; `cluster/grete/science_safety.sbatch`) writes `<exp>/science_safety.json`; `sci-jepa safety` then adds its metrics to every arm's risk card (areas R1, R2, R5, R6, R8). Every system answers the **same** forward-prediction questions (test split, seed 4321, one pool of 100 topic-matched results per question, ties count half); the supervised regressor is skipped because it would retrain.
+
+| Check | Source | What it detects |
+|---|---|---|
+| S1 KU faithfulness | data, Bespoke-MiniCheck-7B on the full paper text | KU sentences not supported by their own paper (training data errors) |
+| S2 fabricated results | every system | a result with a topic-matched paper's numbers, or spliced from it, ranked above the truth |
+| S3 novelty penalty | every system | lower scores on surprising results (far from related training papers' results) |
+| S4 popularity bias | every system, OpenAlex citations | lower scores in small subfields; preferring wrong candidates from more-cited papers |
+| S5 overclaiming | every system | hedged wording made certain or causal, ranked above the truth |
+| S6 dual-use | data (WMDP questions + hazard terms) and every system | hazardous KUs in the training data; extra skill on hazard-topic questions |
+| S7 retractions | data (OpenAlex, arXiv withdrawal notices) | retracted or withdrawn papers per split |
+
+The MiniCheck judge needs `einops` and `sentencepiece`; the job installs nothing and takes them from `SCI-JEPA/.pylib` (`pip install --target .pylib einops sentencepiece`).
+
+
+### 9.6 Science-specific safety: `evaluation/science_safety.py`
+
+`sci-jepa science-safety <results folder> [--n 300] [--n-llm 150] [--n-haz 100] [--n-faith 200] [--skip-data] [--only arms]` (GPU job: `cluster/grete/science_safety.sbatch`) writes `<exp>/science_safety.json`; `sci-jepa safety` then adds its metrics to every system's card and the dashboard's second layer. Every system answers the **same** fixed forward-prediction questions (test split, seed 4321, one 100-candidate pool per question, ties count half); the supervised regressor is skipped because it would retrain.
+
+| Check | Level | How |
+|---|---|---|
+| S1 KU faithfulness | data | KU sentences vs the full paper text, Bespoke-MiniCheck-7B on 6,000-token chunks (supported when P(yes) ≥ 0.5 in a chunk); per KU type, unsupported sentences listed |
+| S2 fabricated results | every system | the true result with a topic-matched paper's numbers, or spliced with half of its result; share ranked above the truth |
+| S3 novelty penalty | every system | MRR on the most surprising third of results (far from related training papers' results) vs the most typical third |
+| S4 popularity bias | every system | MRR in the smallest vs largest subfields; citation percentile of the preferred wrong candidate (OpenAlex) |
+| S5 overclaiming | every system | hedges made certain / causal / general ("suggests" → "proves", "associated with" → "causes", "in some cases" → "in all cases") |
+| S6 dual-use | data + every system | KUs above the 99th-percentile cosine to the WMDP questions and with a hazard term; MRR on hazard questions vs topic-matched others |
+| S7 retractions | data | OpenAlex `is_retracted` and arXiv withdrawal notices per split |
+
+The MiniCheck judge's own model code needs `einops` and `sentencepiece`; the job takes them from `.pylib/` (installed with `pip install --target .pylib einops sentencepiece`) so the shared environment is unchanged. Tests: `tests/test_science_safety.py`.
+
 ---
 
 ## 10. Reporting, dashboard and infrastructure monitoring
 
 * **Dashboard** (`dashboard/`): `telemetry.LiveRun` writes each run's live state (steps, losses, learning rate, validation per epoch, tasks, neurons, world model) as JSON into `<out>/dashboard/runs/`; `dashboard.html` reads it (tabs: Overview, Training dynamics, Validation, Epochs, Reasoning tasks, World model, Neurons, Where it learns, Examples, Graphs, Benchmark, Compare, All runs, Infrastructure). `serve.py` serves the folder over HTTP; in the cluster script one server per job serves the shared folder.
-* **Infrastructure** (`infra/`): `sysinfo.collect()` records the machine (GPUs, MIG slices, driver, CUDA, CPU, memory, Slurm allocation, package versions). `monitor.start()` samples every second with NVML and psutil (GPU utilisation, memory, power, temperature; CPU, RAM) into `infra/<job>/timeseries.csv` and `dashboard/infra/live.json`; training processes write progress (step, epoch, steps/s, ETA) to `infra/progress/`. `report.write_all()` produces `infrastructure.{json,md,tex}` and `figures/infra_*.{png,pdf}` per experiment.
+* **Infrastructure** (`infra/`): `sysinfo.collect()` records the machine (GPUs, MIG slices, driver, CUDA, CPU, memory, Slurm allocation, package versions). `monitor.start()` samples every second with NVML and psutil (GPU utilisation, memory, power, temperature; CPU, RAM) into `infra/<job>/timeseries.csv` and `dashboard/infra/jobs/<cluster>-<job>.json` (one file per job, so jobs on several nodes and clusters all show); training processes write progress (step, epoch, steps/s, ETA) to `infra/progress/`. `report.write_all()` produces `infrastructure.{json,md,tex}` and `figures/infra_*.{png,pdf}` per experiment.
 * **Figures and PDF** (`reporting/figures.py`, `reporting/report_pdf.py`): leaderboards (`leaderboard.csv`, `leaderboard.tex`), the reasoning index with intervals, task heatmaps, robustness per edit kind, per-domain scores, learning curves, LLM comparison, and a multi-page PDF report.
 
 ---
@@ -460,7 +534,7 @@ $STORE/SCI-JEPA/<run>/                       PAPER_A_OUT
 │   ├── infrastructure.{json,md,tex}         hardware, software, compute per method
 │   ├── checkpoints/                         resume files of runs in progress (deleted when done)
 │   └── claims/                              run claims of the current job
-├── dashboard/                               dashboard page, runs/*.json, graphs, infra/live.json
+├── dashboard/                               dashboard page, runs/*.json, graphs, infra/jobs/*.json
 ├── infra/<job>/                             system.json, timeseries.csv per job
 ├── infra/progress/, plan.json, status.json  progress per run, planned runs, completion state
 └── chains.txt                               chain files of this run (run_60k.sh)

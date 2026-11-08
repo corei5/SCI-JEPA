@@ -8,6 +8,7 @@ __pycache__/
 .ipynb_checkpoints/
 dist/
 build/
+/SCI-JEPA-training/scaling/report/
 
 # OS and editors
 .DS_Store
@@ -30,12 +31,8 @@ _st_cache/
 # tracked under Analysis/dataset/papers/ are kept.
 Analysis/dataset/**/raw/
 
-# Graphify: keep graph.json, the report, labels and the human views;
-# ignore caches and the 2.4 MB graph.html that every rebuild regenerates.
-graphify-out/cache/
-graphify-out/manifest.json
-graphify-out/graph.html
-graphify-out/.graphify_analysis.json
-graphify-out/.graphify_labels.pending.json
-graphify-out/.graphify_root
+# Graphify output is regenerated locally on every build; never commit it.
+graphify-out/
 .graphify/
+
+meeting*

@@ -54,6 +54,12 @@ N_PROBE_CLASSES = len(ROLE_RELS) + 1          # role relations + "no edge"
 PROBE_NONE = len(ROLE_RELS)
 
 
+# Neighbour scores cached per process (Sampler._scores), bounded so that
+# 16 batch workers x 4 training processes stay within RAM on the full arXiv split. The values are deterministic,
+# so clearing the cache changes only speed, never a batch.
+SCORE_CACHE_MAX = 20_000                 # ~30 KB per paper at 2M papers: ~0.6 GB per process
+
+
 class Sampler:
     """Draws anchors and neighbourhoods for one split."""
 
@@ -127,6 +133,8 @@ class Sampler:
             frontier = nxt
         out = (np.fromiter(score.keys(), dtype=np.int32, count=len(score)),
                np.fromiter(score.values(), dtype=np.float64, count=len(score)))
+        if len(self._score_cache) >= SCORE_CACHE_MAX:  # bounded: at 2M papers every batch worker's cache grew by
+            self._score_cache.clear()                  #   ~15 GB within an hour and OOM-killed job 38878
         self._score_cache[p0] = out
         return out
 
@@ -242,6 +250,36 @@ def _paper_tokens(gi, p, cfg, rng, keep):
     return comps
 
 
+def _role_rel(gi, cid, rel):
+    """rel[k, m] = rel[m, k] = r for every edge (c, d, r) between two KUs of the view (tokens k, m), with the result
+    of the loop it replaces: for each KU in token order, for each of its edges in order, later writes winning.
+    Done in one pass over the index's edge arrays (~0.1 ms per view instead of a dict lookup per KU and a write per
+    edge); a view holding a KU twice takes the loop itself."""
+    T, mask = len(cid), cid >= 0
+    cs, ks = cid[mask], np.flatnonzero(mask)
+    if not len(cs):
+        return
+    srt = np.argsort(cs, kind="stable")
+    sc = cs[srt]
+    if (sc[1:] == sc[:-1]).any():
+        pos = {int(c): k for k, c in enumerate(cid) if c >= 0}
+        for c, k in pos.items():
+            for d, r in gi.comp_edges.get(c, ()):
+                m = pos.get(d)
+                if m is not None:
+                    rel[k, m] = rel[m, k] = r
+        return
+    E = gi.comp_edges
+    own, d, r = E.entries(cs)                           # every edge of every KU, in loop order
+    j = np.minimum(np.searchsorted(sc, d), len(sc) - 1)
+    hit = sc[j] == d                                    # the other KU is in the view
+    k, m = ks[own[hit]], ks[srt[j[hit]]]
+    cell = np.empty(2 * len(k), np.int64)               # the writes in loop order: (k, m), then (m, k)
+    cell[0::2], cell[1::2] = k * T + m, m * T + k
+    u, last = np.unique(cell[::-1], return_index=True)  # each cell's last write
+    rel.flat[u] = np.repeat(r[hit], 2)[::-1][last]
+
+
 def build_view(gi, papers, comps_per_paper, cfg):
     """Tokens + symmetric relation matrix for a set of papers (no masking)."""
     xs, types, comp_ids, slots, deg = [], [], [], [], []
@@ -265,23 +303,21 @@ def build_view(gi, papers, comps_per_paper, cfg):
     rel[np.ix_(hub, ~hub)] = np.where(same[np.ix_(hub, ~hub)], REL_MEMBER, REL_NONE)
     rel[np.ix_(~hub, hub)] = rel[np.ix_(hub, ~hub)].T
     hub_pos = np.nonzero(hub)[0]
+    cited = {}                                          # paper -> the papers it is linked to by a citation
     for i in hub_pos:                                   # paper-level relations
         for j in hub_pos:
             if i == j:
                 continue
             pi, pj = papers[slot[i]], papers[slot[j]]
-            if (pi, pj) in gi.cites_pairs:
+            if pi not in cited:
+                cited[pi] = gi.cites_pairs.of(pi)
+            if pj in cited[pi]:
                 rel[i, j] = REL_CITES
             elif gi.paper_subfield[pi] == gi.paper_subfield[pj]:
                 rel[i, j] = REL_SAME_SUBFIELD
             elif gi.paper_field[pi] == gi.paper_field[pj]:
                 rel[i, j] = REL_SAME_FIELD
-    pos = {int(c): k for k, c in enumerate(cid) if c >= 0}
-    for c, k in pos.items():                            # role + proxy edges present in the view
-        for d, r in gi.comp_edges.get(c, ()):
-            m = pos.get(d)
-            if m is not None:
-                rel[k, m] = rel[m, k] = r
+    _role_rel(gi, cid, rel)                             # role + proxy edges present in the view
     np.fill_diagonal(rel, REL_NONE)
     return {"x": x, "type": typ, "comp": cid, "slot": slot, "deg": deg, "rel": rel}
 

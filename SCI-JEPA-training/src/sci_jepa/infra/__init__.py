@@ -7,7 +7,8 @@
 Files, next to the experiments of one results folder (PAPER_A_OUT):
     infra/<job id>/system.json        sysinfo record of that job
     infra/<job id>/timeseries.csv     one row per second: GPU memory / power / temperature, CPU, RAM, throughput
-    dashboard/infra/live.json         the latest samples, polled by the dashboard's infrastructure page
+    dashboard/infra/jobs/<cluster>-<job>.json   each job's latest samples, polled by the infrastructure page
+    dashboard/infra/jobs.json         index of the job files above
     infra/progress/<run>.json         each training process's progress (written by train_one)
     <EXP>/infrastructure.{json,md,tex} and <EXP>/figures/infra_*.{png,pdf}   the summary of an experiment
 """

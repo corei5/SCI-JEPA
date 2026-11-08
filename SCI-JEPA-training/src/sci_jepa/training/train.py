@@ -18,9 +18,12 @@ mean / std per metric and paired t-tests against the reference arm.
 """
 import argparse
 import ast
+import io
 import json
 import math
 import os
+import pickle
+import threading
 import time
 
 import numpy as np
@@ -293,11 +296,15 @@ def _batches(sampler, plan_fn, n_steps, batch_size, prefetch, start=0, snap=None
             _StepBuilder(sampler, seed), batch_sampler=_StepPlan(sampler, plan_fn, n_steps, batch_size, start, snap),
             num_workers=workers, collate_fn=_first, prefetch_factor=max(prefetch, 4), pin_memory=torch.cuda.is_available(),
             multiprocessing_context="fork")
+        import gc
+        gc.collect()
+        gc.freeze()          # the index's Python lookups stay shared with the forked workers (no copy-on-write by the GC)
         it = iter(loader)
         try:
             yield from it
         finally:
             del it
+            gc.unfreeze()
         return
     def make(step):
         plan, phase = plan_fn(step)
@@ -361,8 +368,10 @@ def _fp32(out):
 
 # ---- resume a training run across jobs (cfg.resume_runs; run_experiment passes ckpt_path) --------------------
 CKPT_VERSION = 1
-_CKPT_IGNORE = ("out_dir", "model_dir", "index_dir", "device", "resume_runs", "ckpt_every", "llm_models",
-                "batch_workers", "tf32", "fused_adamw", "trainer", "devices")   # speed settings: a run may resume with other values
+_CKPT_IGNORE = ("out_dir", "model_dir", "index_dir", "device", "resume_runs", "ckpt_every", "keep_ckpts", "llm_models",
+                "batch_workers", "tf32", "fused_adamw", "trainer", "devices",   # speed settings: a run may resume with other values
+                "arms", "seeds")                                # which arm x seed runs a job may claim, not how this
+                                                                # run trains (its own seed is the key's "seed")
 
 
 def _ckpt_key(cfg, seed):
@@ -384,23 +393,164 @@ def _set_rng_states(s):
         torch.cuda.set_rng_state_all(s["cuda"])
 
 
+class _Writer:
+    """One background thread for checkpoint files: the training loop hands over a payload already copied to the CPU
+    and goes on training while the file is written (a 2.5 GB checkpoint to NFS took the training thread ~10-20 s;
+    both writers keep the GIL free during the write: safetensors, and _save_ckpt's raw array bytes).
+    At most one write is in flight (the next waits for it); join() waits for the last and re-raises its error."""
+
+    def __init__(self):
+        self.thread, self.err = None, None
+
+    def submit(self, fn, *args):
+        self.join()
+
+        def run():
+            try:
+                fn(*args)
+            except BaseException as e:                 # noqa: BLE001  (raised again in join, on the training thread)
+                self.err = e
+        self.thread = threading.Thread(target=run, name="ckpt-writer")
+        self.thread.start()
+
+    def join(self):
+        if self.thread is not None:
+            self.thread.join()
+            self.thread = None
+        if self.err is not None:
+            e, self.err = self.err, None
+            raise e
+
+
+_WRITER = _Writer()
+
+
+def _cpu_copy(x):
+    """x with every tensor copied to the CPU (a copy for CPU tensors too): training changes the originals while the
+    background thread writes, so the file holds exactly the state of the step it was taken at."""
+    if torch.is_tensor(x):
+        return x.detach().to("cpu", copy=True)
+    if isinstance(x, dict):
+        return {k: _cpu_copy(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return type(x)(_cpu_copy(v) for v in x)
+    return x
+
+
+_CKPT_MAGIC = b"SJCKPT01"         # resume file: magic, 8-byte length of the pickle, the pickle, raw array bytes
+
+
 def _save_ckpt(path, payload):
-    """Atomic: a job killed while writing leaves the previous checkpoint intact."""
+    """Atomic: a job killed while writing leaves the previous checkpoint intact.
+    Runs on the background thread (_WRITER). torch.save holds the GIL for most of a write (the training thread ran
+    at ~20% of its speed during a 1 GiB write to NFS), so every tensor and numeric numpy array is written as raw
+    bytes with plain file writes, which release it; only the small rest is pickled, with each array replaced by
+    its place in the file. _read_ckpt reads this format and files written by torch.save before it."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    data, pids, off = [], {}, 0
+
+    class _P(pickle.Pickler):
+        def persistent_id(self, obj):
+            nonlocal off
+            if torch.is_tensor(obj):
+                raw = obj.detach().cpu().contiguous().reshape(-1).view(torch.uint8).numpy()
+                meta = ("t", str(obj.dtype).split(".")[-1], tuple(obj.shape))
+            elif isinstance(obj, np.ndarray) and obj.dtype.kind in "biufc":
+                raw = np.ascontiguousarray(obj).reshape(-1).view(np.uint8)
+                meta = ("n", obj.dtype.str, obj.shape)
+            else:
+                return None
+            if id(obj) not in pids:                     # an array referenced twice is stored (and loaded) once
+                pids[id(obj)] = (meta[0], len(data), off, raw.nbytes, *meta[1:])
+                data.append((obj, raw)); off += raw.nbytes
+            return pids[id(obj)]
+
+    buf = io.BytesIO()
+    _P(buf, protocol=pickle.HIGHEST_PROTOCOL).dump(payload)
+    head = buf.getvalue()
     tmp = path + ".tmp"
-    torch.save(payload, tmp)
+    with open(tmp, "wb") as f:
+        f.write(_CKPT_MAGIC + len(head).to_bytes(8, "little"))
+        f.write(head)
+        for _, raw in data:
+            f.write(raw)
     os.replace(tmp, path)
+
+
+def _read_ckpt(path):
+    """A resume file written by _save_ckpt, or by torch.save (older checkpoints)."""
+    with open(path, "rb", buffering=0) as f:           # unbuffered: the arrays are read straight into place
+        if f.read(len(_CKPT_MAGIC)) != _CKPT_MAGIC:
+            return torch.load(path, map_location="cpu", weights_only=False)
+        n = int.from_bytes(f.read(8), "little")
+        head = bytearray(n)
+        if f.readinto(head) != n:
+            raise EOFError(f"{path} is truncated")
+        base, got = f.tell(), {}
+
+        def fill(dst):                                  # a raw read may return less than asked: read until full
+            view, done = memoryview(dst).cast("B"), 0
+            while done < len(view):
+                k = f.readinto(view[done:])
+                if not k:
+                    raise EOFError(f"{path} is truncated")
+                done += k
+
+        class _U(pickle.Unpickler):
+            def persistent_load(self, pid):
+                kind, k, at, nbytes, dtype, shape = pid
+                if k not in got:
+                    f.seek(base + at)
+                    if kind == "t":
+                        raw = torch.empty(nbytes, dtype=torch.uint8)
+                        dst = raw.numpy()
+                    else:
+                        arr = np.empty(shape, dtype=np.dtype(dtype))
+                        dst = arr.reshape(-1).view(np.uint8)
+                    fill(dst)
+                    got[k] =raw.view(getattr(torch, dtype)).reshape(shape) if kind == "t" else arr
+                return got[k]
+
+        return _U(io.BytesIO(head)).load()
+
+
+def keep_steps(n_steps, k):
+    """The steps whose weights a run keeps (cfg.keep_ckpts): the last step of each k-th of training."""
+    return sorted({max(int(math.ceil(i * n_steps / k)) - 1, 0) for i in range(1, k + 1)}) if k > 0 else []
+
+
+def _keep_weights(model, cfg, save_dir, step, n_steps, epoch, sec, loss):
+    """One kept checkpoint (cfg.keep_ckpts): the weights only (all modules, incl. the EMA target encoder), loadable
+    like model.safetensors; written atomically, never deleted."""
+    from safetensors.torch import save_file
+    d = os.path.join(save_dir, "checkpoints")
+    os.makedirs(d, exist_ok=True)
+    if not os.path.exists(os.path.join(save_dir, "config.json")):   # so a checkpoint loads before the run ends
+        json.dump(cfg.as_dict(), open(os.path.join(save_dir, "config.json"), "w"), indent=2, default=str)
+    path = os.path.join(d, f"step{step + 1:07d}.safetensors")
+    meta = {"step": str(step + 1), "n_steps": str(n_steps), "epoch": str(epoch), "train_sec": f"{sec:.0f}",
+            "train_jepa": "" if loss is None else f"{loss:.6g}", "saved": time.strftime("%Y-%m-%d %H:%M:%S")}
+    state = {k: v.detach().to("cpu", copy=True).contiguous() for k, v in model.state_dict().items()}
+
+    def write():                                       # in the background (_WRITER), like the resume checkpoints
+        save_file(state, path + ".tmp", metadata=meta)
+        os.replace(path + ".tmp", path)
+    _WRITER.submit(write)
+    return path
 
 
 def _load_ckpt(path, key, log):
     if not path or not os.path.exists(path):
         return None
     try:
-        ck = torch.load(path, map_location="cpu", weights_only=False)
+        ck = _read_ckpt(path)
     except Exception as e:                              # noqa: BLE001  (a damaged file: start over)
         log(f"  [resume] cannot read {path} ({e}): starting this run from the beginning")
         return None
-    if ck.get("version") != CKPT_VERSION or ck.get("key") != key:
+    # settings ignored now are dropped from the stored key too: a checkpoint written before a setting joined
+    # _CKPT_IGNORE (e.g. "arms") still resumes
+    stored = {k: v for k, v in (ck.get("key") or {}).items() if k not in _CKPT_IGNORE}
+    if ck.get("version") != CKPT_VERSION or stored != key:
         log(f"  [resume] {path} belongs to other settings: starting this run from the beginning")
         return None
     return ck
@@ -413,7 +563,16 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
     ckpt_path: resume file. If it exists and belongs to this run (same settings and seed), training continues
     from it; while training, a checkpoint is written every cfg.ckpt_every steps and at every epoch end, and
     once more when training ends (so a job stopped during the final evaluation does not retrain). The caller
-    deletes it when the result is saved. None = no checkpoints (the original behaviour)."""
+    deletes it when the result is saved. None = no checkpoints (the original behaviour).
+    cfg.keep_ckpts (with save_dir): the weights at that many evenly spaced steps are kept in save_dir/checkpoints/
+    (keep_steps); a resumed run writes the ones still ahead of it."""
+    try:
+        return _train_one(cfg, gi, seed, log, live, save_dir, ckpt_path)
+    finally:                                           # the last checkpoint is on disk before the caller goes on
+        _WRITER.join()
+
+
+def _train_one(cfg, gi, seed, log, live, save_dir, ckpt_path):
     set_seed(seed)
     dev = torch.device(resolve_device(cfg.device))
     if cfg.minimal_pairs and cfg.mp_filter:            # adversarially filtered counterfactuals (validity.py)
@@ -439,6 +598,8 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
     sampler = Sampler(gi, cfg, "train", seed)
     gen = torch.Generator(device=dev).manual_seed(seed)
     history, t0 = [], time.time()
+    from sci_jepa.infra.cost import RunMeter
+    meter = RunMeter(dev)                              # peak memory, GPU energy (dashboard: Cost & efficiency)
     n_steps, plan_fn, sched_info = mask_plan(cfg, sampler)
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_factor(cfg, n_steps))   # warm-up, then constant / cosine
     log(f"  [lr] {cfg.lr_schedule}: warm-up {cfg.warmup} steps to {cfg.lr:g}"
@@ -451,6 +612,7 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
     epoch_of = lambda st: round((st + 1) * per_step / total_anchors, 4)   # passes over all target KUs
     if live is not None:
         live.state["steps_total"] = n_steps
+        live.state["params_trainable"] = int(sum(p.numel() for p in params))   # All runs, while the run trains
         live.state["schedule"] = sched_info
         live.state["epochs_total"] = round(n_steps * per_step / total_anchors, 3)
         live.state["steps_per_epoch"] = total_anchors / per_step
@@ -495,14 +657,25 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
             live.restore(step)
     # progress for the infrastructure monitor (sci_jepa.infra): a tiny file about every 5 s, never fatal
     prog_name = live.name if live is not None else f"run_seed{seed}"
-    prog = {"t": time.time(), "step": step}
+    # loss_sum / loss_n: the JEPA loss since the last report (summed on the GPU, read every ~5 s); val: the latest
+    # validation (epoch end or live pass); rate: steps / s, smoothed so the time left does not jump
+    prog = {"t": time.time(), "step": step, "loss_sum": 0.0, "loss_n": 0, "ep_sum": 0.0, "ep_n": 0, "val": None,
+            "rate": None}
 
     def report(status, at):
         try:
             from sci_jepa.infra.monitor import write_progress
             now = time.time()
             rate = (at - prog["step"]) / max(now - prog["t"], 1e-9) if status == "training" else None
+            if rate:
+                prog["rate"] = rate if prog["rate"] is None else 0.8 * prog["rate"] + 0.2 * rate
             prog.update(t=now, step=at)
+            rate = prog["rate"] if status in ("training", "validating") else None
+            loss = float(prog["loss_sum"]) / prog["loss_n"] if prog["loss_n"] else None
+            prog.update(loss_sum=0.0, loss_n=0)
+            if loss is not None:
+                prog["loss"] = loss
+            v = prog["val"] or {}
             mem = {}
             if dev.type == "cuda":
                 mem = {"device": torch.cuda.get_device_name(dev),
@@ -514,22 +687,32 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
                            elapsed_s=round(now - t0), steps_per_s=round(rate, 3) if rate else None,
                            instances_per_s=round(rate * cfg.batch_size, 1) if rate else None,
                            eta_max_s=round((n_steps - at - 1) / rate) if rate else None,
-                           best_epoch=best_state["epoch"] if best_state else None,
+                           eta_finish=round(now + (n_steps - at - 1) / rate) if rate else None,
+                           loss=prog.get("loss"), loss_epoch=float(prog["ep_sum"]) / prog["ep_n"] if prog["ep_n"] else None,
+                           val_bal_mrr=v.get("bal_MRR"), val_chance=v.get("chance"), val_epoch=v.get("epoch"),
+                           val_kind=v.get("kind"), best_epoch=best_state["epoch"] if best_state else None,
                            batch_size=cfg.batch_size, params_trainable=int(sum(p.numel() for p in params)), **mem)
         except Exception:                               # noqa: BLE001  (monitoring never stops training)
             pass
     report("starting", step)
     ck_every = cfg.ckpt_every if ckpt_path else 0
     snap = (lambda st: (ck_every and (st + 1) % ck_every == 0) or st in epoch_ends) if ckpt_path else None
+    keep_at = set(keep_steps(n_steps, cfg.keep_ckpts)) if save_dir else set()   # kept weights (cfg.keep_ckpts)
+    if keep_at:
+        log(f"  [keep] weights at {len(keep_at)} steps ({', '.join(str(s + 1) for s in sorted(keep_at))}) -> "
+            f"{os.path.join(save_dir, 'checkpoints')}" + (f"; {sum(s <= step for s in keep_at)} already passed"
+                                                          if step >= 0 else ""))
 
     def checkpoint(at, sampler_state, done):
-        _save_ckpt(ckpt_path, {
+        # everything training goes on changing is copied here, on the training thread; the file is written in the
+        # background (_WRITER). The sampler state and best_state are snapshots already (replaced, never changed).
+        _WRITER.submit(_save_ckpt, ckpt_path, {
             "version": CKPT_VERSION, "key": key, "step": at, "done": done,
-            "model": {k: v.detach().cpu() for k, v in model.state_dict().items()},
-            "opt": opt.state_dict(), "sched": sched.state_dict(),
-            "scaler": scaler.state_dict() if scaler is not None else None,
+            "model": _cpu_copy(model.state_dict()),
+            "opt": _cpu_copy(opt.state_dict()), "sched": _cpu_copy(sched.state_dict()),
+            "scaler": _cpu_copy(scaler.state_dict()) if scaler is not None else None,
             "gen": gen.get_state(), "rng": _rng_states(), "sampler": sampler_state,
-            "history": history, "epoch_results": epoch_results, "best_state": best_state,
+            "history": list(history), "epoch_results": list(epoch_results), "best_state": best_state,
             "ep_sum": float(ep_sum), "ep_n": ep_n, "phase": phase, "stopped_epoch": stopped_epoch,
             "elapsed": time.time() - t0, "saved": time.strftime("%Y-%m-%d %H:%M:%S"),
             "job": os.environ.get("SLURM_JOB_ID")})
@@ -542,6 +725,8 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
             log(f"  [lightning] not used ({why}): native training loop")
             use_lightning = False
     if use_lightning:
+        if keep_at:
+            log("  [keep] the Lightning loop keeps no intermediate weights (KEEP_CKPTS needs the native loop)")
         res = LL.fit_lightning(model=model, cfg=cfg, gi=gi, dev=dev, seed=seed, log=log, live=live, opt=opt,
                                sched=sched, scaler=scaler, params=params, sampler=sampler, plan_fn=plan_fn,
                                n_steps=n_steps, prefetch=prefetch, workers=workers, epoch_ends=epoch_ends,
@@ -598,6 +783,8 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
                     out["pred"][keep], p2.float(), cfg.contrast_margin)
         loss = sum(parts.values())
         ep_sum, ep_n = ep_sum + parts["jepa"].detach(), ep_n + 1
+        prog["loss_sum"], prog["loss_n"] = prog["loss_sum"] + parts["jepa"].detach(), prog["loss_n"] + 1
+        prog["ep_sum"], prog["ep_n"] = ep_sum, ep_n
         opt.zero_grad(set_to_none=True)
         if scaler is not None:                          # fp16: scale the loss so small gradients survive
             scaler.scale(loss).backward()
@@ -630,10 +817,13 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
                 live.step({**rec, "total": float(loss.detach()), "lr": float(sched.get_last_lr()[0]), "ema": m,
                            "grad_norm": gnorm, **_step_stats(out, batch, cfg)})
         if step in epoch_ends:
+            report("validating", step)
             rec = epoch_checkpoint(model, gi, cfg, dev, epoch_ends[step], step, float(ep_sum) / max(ep_n, 1),
                                    time.time() - t0, live)
             epoch_results.append(rec)
             ep_sum, ep_n = 0.0, 0
+            prog.update(ep_sum=0.0, ep_n=0, val={"bal_MRR": rec["bal_MRR"], "chance": rec.get("bal_chance"),
+                                                  "epoch": rec["epoch"], "kind": "epoch end"})
             rec["select_score"] = _select_score(rec, cfg)
             if track_best and (best_state is None or rec["select_score"] > best_state["score"]):
                 best_state = {"epoch": rec["epoch"], "score": rec["select_score"],
@@ -652,9 +842,17 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
                 break
         if live is not None and cfg.eval_every and step > 0 and step % cfg.eval_every == 0:
             quick = cfg.override(eval_instances=cfg.live_eval_instances, probe_papers=min(cfg.probe_papers, 40))
-            live.eval(step, evaluate(model, gi, quick, dev, None, split="val"), epoch=epoch_of(step))
+            report("validating", step)
+            qm = evaluate(model, gi, quick, dev, None, split="val")
+            live.eval(step, qm, epoch=epoch_of(step))
+            rb = qm.get("retrieval_balanced") or {}
+            if rb.get("MRR") is not None:
+                prog["val"] = {"bal_MRR": rb["MRR"], "chance": rb.get("chance_MRR"), "epoch": epoch_of(step), "kind": "live"}
             if cfg.neuron_report and step not in epoch_ends:
                 live.neurons(step, epoch_of(step), neuron_report(model, gi, cfg, dev, "val", cfg.neuron_instances))
+        if step in keep_at:
+            p = _keep_weights(model, cfg, save_dir, step, n_steps, epoch_of(step), time.time() - t0, prog.get("loss"))
+            log(f"  [keep] step {step + 1}: weights kept in {p}")
         if sampler_state is not None:                   # every ckpt_every steps and at every epoch end
             checkpoint(step, sampler_state, done=False)
 
@@ -698,6 +896,7 @@ def train_one(cfg, gi, seed, log=print, live=None, save_dir=None, ckpt_path=None
     metrics["epoch_results"] = epoch_results
     metrics["train_sec"] = round(time.time() - t0, 1)
     metrics["params_trainable"] = int(sum(p.numel() for p in params))
+    metrics["cost"] = meter.result()
     metrics["samples_seen"] = int(n_steps * cfg.batch_size)
     metrics["schedule"] = {**sched_info, "passes_completed": dict(getattr(sampler, "passes", {}))}
     metrics["run_length"] = {"max_epochs": cfg.epochs, "epochs_trained": epoch_of(last_step),
@@ -816,6 +1015,15 @@ def expand_llm_arms(arms, cfg):
     return out
 
 
+def select_arms(arms, cfg):
+    """With cfg.arms, only those arm tags (an arm expanded by expand_llm_arms is selected by its base tag too, e.g.
+    "LLM-Reasoning" keeps every LLM-Reasoning@<model>). Without it, the arms are returned unchanged."""
+    if not cfg.arms:
+        return list(arms)
+    keep = set(cfg.arms)
+    return [(tag, over) for tag, over in arms if tag in keep or tag.split("@")[0] in keep]
+
+
 def _skipped(acfg, over):
     """Arms run_experiment skips (identical arms in paper mode; the LLM without a CUDA GPU)."""
     if acfg.ku_mode == "paper" and over.keys() & {"target_types", "mask_schedule", "replay_frac"}:
@@ -828,7 +1036,7 @@ def missing_runs(cfg, exp, name=None):
     cfg.out_dir/<name>; [] = the experiment is complete."""
     out_dir = os.path.join(cfg.out_dir, name or exp)
     miss = []
-    for tag, over in expand_llm_arms(EXPERIMENTS[exp], cfg):
+    for tag, over in select_arms(expand_llm_arms(EXPERIMENTS[exp], cfg), cfg):
         acfg = cfg.override(**over)
         if _skipped(acfg, over):
             continue
@@ -865,6 +1073,8 @@ def run_experiment(cfg, gi, exp=None, arms=None, log=print, live_root=None, resu
     nobody has taken: first the quick comparison systems (results within hours), then the trained arms (the
     longest), then the LLMs, so the GPUs finish at about the same time."""
     arms = expand_llm_arms(arms or (EXPERIMENTS[exp] if exp else [("single", {})]), cfg)
+    if exp:
+        arms = select_arms(arms, cfg)
     dynamic = shard is not None and os.environ.get("SCI_JEPA_CLAIM") == "1"
     if dynamic:                                         # quick comparison systems, trained arms, then the LLMs
         rank = lambda o: 1 if not o.get("baseline") else 2 if o.get("baseline") == "llm" else 0

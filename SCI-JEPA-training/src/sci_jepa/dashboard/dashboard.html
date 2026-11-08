@@ -15,9 +15,29 @@ h1{font-size:17px;margin:0;margin-right:auto;white-space:nowrap}select,button,in
 label{display:inline-flex;gap:4px;align-items:center;max-width:100%}select{max-width:100%;min-width:0}
 .badge{padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;color:#fff;background:var(--muted)}.badge.running{background:var(--accent)}.badge.done{background:var(--good)}.badge.failed{background:var(--bad)}
 .progress{width:160px;height:8px;background:var(--line);border-radius:4px;overflow:hidden}.progress>div{height:100%;background:var(--accent);width:0}
-nav{display:flex;gap:4px;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
-nav button{border:none;background:none;padding:7px 12px;border-radius:6px;white-space:nowrap}nav button.on{background:var(--accent);color:#fff}
-main{padding:16px;max-width:1500px;margin:0 auto}.tab{display:none}.tab.on{display:block}
+/* app shell: slim top bar, side panel (left or right), content */
+#app{display:flex;align-items:flex-start;min-height:calc(100vh - var(--hdr,53px))}
+#app[data-side="right"]{flex-direction:row-reverse}
+nav#tabs{position:sticky;top:var(--hdr,53px);flex:0 0 236px;width:236px;height:calc(100vh - var(--hdr,53px));overflow-y:auto;background:var(--panel);
+  padding:10px 8px 14px;display:flex;flex-direction:column;gap:1px;border-right:1px solid var(--line)}
+#app[data-side="right"] nav#tabs{border-right:none;border-left:1px solid var(--line)}
+nav .grp{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:12px 8px 4px}
+nav .grp:first-of-type{margin-top:2px}
+nav button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:none;background:none;padding:7px 9px;border-radius:7px;white-space:nowrap;cursor:pointer}
+nav button:hover{background:var(--soft)}nav button.on{background:var(--accent);color:#fff}
+nav button .ic{width:17px;height:17px;opacity:.85;flex:0 0 17px}nav button .lb{overflow:hidden;text-overflow:ellipsis}
+nav .toc{display:none;flex-direction:column;margin:2px 0 6px 18px;padding-left:8px;border-left:2px solid var(--line)}
+nav .toc.on{display:flex}nav .toc a{color:var(--muted);text-decoration:none;font-size:12px;padding:3px 6px;border-radius:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+nav .toc a:hover{color:var(--text);background:var(--soft)}
+nav .foot{margin-top:auto;padding-top:12px;display:flex;gap:6px}nav .foot button{justify-content:center;font-size:12px;border:1px solid var(--line);padding:5px}
+#app.mini nav#tabs{flex-basis:56px;width:56px}#app.mini nav .lb,#app.mini nav .grp,#app.mini nav .toc{display:none}
+#app.mini nav button{justify-content:center}#app.mini nav .foot{flex-direction:column}
+main{flex:1;min-width:0;padding:16px 20px;max-width:1600px;margin:0 auto}.tab{display:none}.tab.on{display:block}
+main .crumb{font-size:12px;color:var(--muted);margin:0 0 10px}main .crumb b{color:var(--text);font-size:15px}
+@media (max-width:900px){#app,#app[data-side="right"]{flex-direction:column;align-items:stretch}main{width:100%;max-width:100vw}
+  .card{max-width:100%;overflow-x:auto}
+  nav#tabs{position:sticky;top:0;z-index:4;flex:none;width:100%;height:auto;flex-direction:row;overflow-x:auto;border:none;border-bottom:1px solid var(--line);padding:6px 8px}
+  nav .grp,nav .toc,nav .foot{display:none!important}nav button{width:auto}main{padding:12px 16px}}
 .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(440px,1fr))}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px}.grid .card{margin-bottom:0}
 .card h3{margin:0 0 2px;font-size:14px}.card p.hint{margin:0 0 8px;color:var(--muted);font-size:12px}
@@ -40,17 +60,20 @@ dl{display:grid;grid-template-columns:220px 1fr;gap:6px 14px;margin:0}dt{font-we
 @media (max-width:620px){#wm-grid{grid-template-columns:1fr!important}#wm-net{height:420px!important}.grid{grid-template-columns:1fr}.progress{width:90px}dl{grid-template-columns:1fr}}
 </style></head><body>
 <header>
- <h1>Paper A — training dashboard</h1>
+ <h1>SCI-JEPA · analysis dashboard</h1>
  <select id="run" title="run"></select>
  <label class="muted" title="switch automatically to the newest run (the one training now)"><input type="checkbox" id="follow" checked> follow latest</label>
  <span id="badge" class="badge">–</span>
  <div class="progress"><div id="prog"></div></div><span id="stepinfo" class="muted"></span>
  <label class="muted">x-axis <select id="xaxis"><option value="epoch">epoch</option><option value="step">step</option></select></label>
  <label class="muted"><input type="checkbox" id="live" checked> live</label>
+ <a href="https://drive.google.com/drive/folders/1VcbLjhwSJ46Xtax0lCGrqJBEZh7PQnB9?usp=sharing" target="_blank" rel="noopener" title="shared Google Drive folder" style="font-size:13px;color:var(--accent);text-decoration:none">Drive ↗</a>
  <button id="theme" title="light / dark" style="padding:5px 8px">◐</button>
 </header>
-<nav id="tabs"></nav>
+<div id="app" data-side="left">
+<nav id="tabs" aria-label="views"></nav>
 <main>
+ <div class="crumb" id="crumb"></div>
  <section class="tab" id="t-overview">
   <div class="kpis" id="kpis"></div>
   <div class="card" id="headline"></div>
@@ -109,6 +132,10 @@ dl{display:grid;grid-template-columns:220px 1fr;gap:6px 14px;margin:0}dt{font-we
  </section>
  <section class="tab" id="t-graphs"><div class="row"><select id="gsel"></select><a id="gopen" target="_blank">open in new tab ↗</a></div><iframe id="gframe"></iframe></section>
  <section class="tab" id="t-bench">
+  <div class="card"><div class="row"><b>Paired benchmark (protocol v2: evaluation audit fixed)</b><span class="muted" id="v2-meta"></span></div>
+   <p class="hint">Every saved model and comparison system re-scored, without retraining, on <b>one shared question set</b>: the same questions, 100-candidate pools, counterfactual edits, consistency pairs and intervention donors. Ties count half (mid-rank). <b>Average</b> = mean of forward, design, abduction (balanced MRR) and consistency (balanced accuracy), in %; per question, seeds are averaged first; 95 % intervals from a paired bootstrap over the shared questions (consistency pairs resampled by paper). Consistency: JEPA inverse head; embedding systems: probe on their own vectors; LLMs: summed log-probability with a threshold tuned on train pairs; AUC is threshold-free. Intervention: gain in the donor result's reciprocal rank after swapping in the donor's procedure (not in the average). The best JEPA is chosen on <b>validation</b>.</p>
+   <div id="v2-verdict"></div>
+   <div class="scroll"><table id="v2-table"></table></div></div>
   <div class="card"><div class="row"><b>Benchmark</b><select id="bench-exp"></select><select id="bench-fam" title="show one family of systems"><option value="">all systems</option><option value="comparison">comparison systems</option><option value="gnn">JEPA + GNN encoder</option><option value="jepa">JEPA + graph transformer</option></select><span class="muted" id="bench-meta"></span></div>
    <p class="hint">Every run of one experiment, one row per arm (mean over seeds, ± std). Run <code>EXPERIMENTS = ["BENCH"]</code> for the full benchmark (14 systems: five comparison systems, JEPA with three GNN encoders + Graph-JEPA, five JEPA graph-transformer variants) or <code>["ALL"]</code> for every distinct method of every experiment (66), on the same papers, candidates and evaluation. Pick a family with the second menu. Green = best in its column. Numbers are from the test split of finished runs.</p>
    <div id="bench-rhead"></div></div>
@@ -129,11 +156,46 @@ dl{display:grid;grid-template-columns:220px 1fr;gap:6px 14px;margin:0}dt{font-we
   <div class="card"><h3>Side by side</h3><p class="hint">Green = the better of the two (by a clear margin), grey = about the same. ×chance: 1 = guessing, ≥ 1.5 = learned.</p><div style="overflow-x:auto"><table id="cmp-table"></table></div></div>
   <div class="grid" id="g-cmp"></div>
  </section>
+ <section class="tab" id="t-safety">
+  <div class="card"><div class="row"><b>Safety and reliability</b><span class="muted" id="safe-meta"></span></div>
+   <p class="hint">The model ranks findings and judges evidence; it never writes text. The risks are about being trusted when it is wrong: fooled by meaning-reversing edits, shortcuts instead of reasoning, unequal quality across research fields, biased or over-confident judgements. Each check gets <span class="pill" style="background:var(--good)">pass</span> <span class="pill" style="background:var(--warn)">warn</span> <span class="pill" style="background:var(--bad)">fail</span> against fixed limits (shown under each column). Created by <code>sci-jepa safety &lt;results folder&gt;</code> (add <code>--models</code> for the checks that need the trained models).</p>
+   <div id="safe-summary"></div></div>
+  <div class="card"><h3>Risk card: is it safe for scientists to rely on this model?</h3>
+   <p class="hint">The model ranks findings and judges evidence for scientists; it writes no text and takes no actions. So the risks of chat assistants (harmful text, refusal jailbreaks, deception, sandbagging) do not apply, and are not scored. What matters is being <b>trusted when it is wrong</b>. The checks are grouped into eight risk areas (R1–R8), each with the question a scientist would ask, how it is measured, and the standard it follows (NIST AI Risk Management Framework, HELM, and the method behind each check).</p>
+   <p class="hint" id="card-src"></p>
+   <div id="sci-data"></div>
+   <p class="hint" style="margin-top:12px"><b>Scorecard</b>: one row per system, one column per risk area; a cell shows the worst flag among that area's checks (hover for the values). <i>model</i> = needs the GPU model check, <i>not run</i> = not scored on the shared questions yet. Values carry 95 % intervals (bootstrap over test queries; Wilson when only totals are stored).</p>
+   <div class="scroll"><table id="card-matrix"></table></div>
+   <div id="card-sections"></div></div>
+  <div class="card"><h3>All raw checks per system (test split, mean over seeds)</h3><p class="hint"><b>Robustness</b>: share of edited copies (direction / negation / number / substitution) ranked below the true answer, chance 0.5. <b>Worst-domain gap</b>: how much lower the weakest research field scores than the average. <b>Label gap</b>: |recall of "supports" − recall of "contradicts"|: a large gap means the system mostly answers one way. <b>Identity probe</b>: how well the model's vectors identify the source paper (a shortcut when high). <b>Structure reliance</b>: accuracy lost when every typed graph edge is removed (near 0 = the graph is not used). <b>False accept</b>: a wrong candidate also passes the 0.80 similarity rule. <b>Later papers</b>: drop on papers after the encoders' training cutoff (n/a when every test paper is later).</p><div style="overflow-x:auto"><table id="safe-table"></table></div></div>
+  <div class="card"><h3>Checks per trained model</h3><p class="hint"><b>Calibration</b>: expected calibration error (ECE) of the supports / contradicts probability (0 = a 90 % answer is right 90 % of the time). <b>Selective prediction</b>: forward-prediction Hits@1 on all queries vs only the 40 % the model is most confident about. <b>Paraphrase stable</b>: the true result keeps its rank (±1) when reworded without changing its meaning. <b>Prefers paraphrase</b>: the reworded truth scores above a meaning-reversing edit.</p><div style="overflow-x:auto"><table id="safe-models"></table></div><div id="safe-rel"></div></div>
+  <div class="card"><h3>Not yet evaluated · intended use</h3><div id="safe-notes"></div></div>
+ </section>
+ <section class="tab" id="t-reg">
+  <div class="card"><div class="row"><b>Regulation and ethics: EU AI Act, AI ethics, data protection and other AI frameworks</b><select id="reg-fw"><option value="">all frameworks</option></select><span class="muted" id="reg-meta"></span></div>
+   <p class="hint">Each requirement of the frameworks that govern AI, checked against the project's own artifacts where possible (configs, the columns the pipeline reads, a scan of every KU text for personal data, the safety results, compute logs, documentation). <span class="pill" style="background:var(--good)">met</span> <span class="pill" style="background:var(--warn)">partly</span> <span class="pill" style="background:var(--bad)">gap</span> <span class="pill" style="background:#0891b2">ready</span> = a draft is prepared and waits for a signature · <span class="pill" style="background:var(--accent)">manual</span> = needs a human or organisational step · n/a · info. An engineering self-assessment, not legal advice.</p>
+   <div id="reg-summary"></div>
+   <div class="scroll"><table id="reg-table"></table></div></div>
+ </section>
+ <section class="tab" id="t-cost">
+  <div class="card"><h3>Cost &amp; efficiency: time, memory, energy, compute and money of every run</h3>
+   <div class="row" style="flex-wrap:wrap;gap:10px"><select id="cost-exp" title="which experiment"></select>
+    <label title="GPU assumed for runs that recorded neither their GPU nor a SLURM job with an infrastructure record">GPU when not recorded <select id="cost-assume"></select></label>
+    <span id="cost-prices" class="row" style="flex-wrap:wrap;gap:10px"></span>
+    <label>grid kg CO₂e/kWh <input id="cost-grid" type="number" min="0" step="0.01" value="0.38" style="width:72px"></label>
+    <label>PUE <input id="cost-pue" type="number" min="1" step="0.05" value="1.2" style="width:56px"></label>
+    <span class="muted" id="cost-meta"></span></div>
+   <p class="hint">Reported as in the literature on ML compute (Strubell et al. 2019, Henderson et al. 2020, Patterson et al. 2021, ML CO2 impact / CodeCarbon). <b>Time</b>: each run's own timer (training and evaluation of a model, or the whole evaluation of a comparison system). <b>GPU</b>: the one the run trained on, as the run recorded it (newer runs), else from the infrastructure record of its SLURM job, else the GPU chosen above (marked <i>assumed</i>). <b>GPU-hours</b> are hours on one GPU or GPU slice, per GPU type; a MIG slice xg.yygb counts as x/7 of its GPU. <b>Memory</b>: peak GPU memory allocated by PyTorch and peak resident memory of the process (an upper bound when one process trains several runs). <b>Energy</b>: measured from the GPU's energy counter (NVML) where the run recorded it; on a MIG slice the counter belongs to the whole GPU, so it is scaled by the slice share; otherwise estimated as GPU-hours × the board power of that GPU (L40S 350 W, H100 NVL 400 W, RTX A5000 230 W, RTX 3090 350 W). Both are multiplied by the PUE; CO₂e = energy × grid intensity; cost = GPU-hours × the price per hour of that GPU above. <b>FLOPs</b> ≈ 6 × trainable parameters × instances seen × 189 tokens (JEPA models; the same estimate as the compliance report); <b>MFU</b> = FLOPs ÷ (time × dense bf16 peak FLOP/s of that GPU or slice), with evaluation inside the time, so a lower bound. <b>Quality</b>: average % over the five reasoning tasks on test. Runs that finished before this accounting existed are estimated from their recorded time (<b>source</b>).</p>
+   <div class="kpis" id="cost-kpi"></div></div>
+  <div class="card"><h3>Per method (sum over seeds; time and memory per run)</h3><div class="scroll"><table id="cost-table"></table></div></div>
+  <div class="card"><h3>Data and run length per method</h3><p class="hint">How much data each method saw and how long it ran. <b>Papers</b> and <b>KUs</b>: the KU graph the run trained on (train / val / test papers by the time split). <b>Epochs</b> and <b>steps</b>: mean per run (best epoch = the one kept by model selection). <b>Instances seen</b> = steps × batch size. <b>Wall-clock</b>: total over all runs of the method.</p><div class="scroll"><table id="cost-data"></table></div></div>
+  <div class="card"><h3>Quality for the money</h3><p class="hint">One dot per method: cost of one run (€, log scale) against its average reasoning %. Up and to the left is better; the dashed line joins the methods no other method beats on both. Hover a dot for its numbers.</p><div id="cost-plot"></div></div>
+ </section>
  <section class="tab" id="t-infra"><iframe src="infra.html" title="training infrastructure, live" style="width:100%;height:calc(100vh - 120px);border:0;background:transparent"></iframe></section>
  <section class="tab" id="t-runs">
-  <div class="card"><h3>All runs (live)</h3><p class="hint">Every model trained so far, refreshed every few seconds. Click a run name to open it.</p><div class="scroll"><table id="runs-table"></table></div></div>
-  <div class="card"><div class="row"><b>Reasoning tasks: every run</b><select id="tm-src"><option value="best">test if finished, else latest epoch</option><option value="val">latest epoch (validation)</option></select></div>
-   <p class="hint">One row per run, one column per reasoning task (see the Reasoning tasks tab). Retrieval tasks: ×chance; consistency: balanced accuracy; intervention: relative shift of the predicted result when the condition is swapped.</p>
+  <div class="card"><h3>All runs (live)</h3><p class="hint">Every model trained so far, refreshed every few seconds. Click a run name to open it. <b>Model</b>: graph encoder (width × encoder + predictor layers) and the text encoder of the KU features, or the comparison system. <b>GPU</b>: as the run recorded it, else from the infrastructure record of its SLURM job. <b>Params</b>: trainable parameters. <b>Data</b>: papers in the KU graph (train / val / test), its knowledge units, and the training instances seen (planned while a run trains).</p><div class="scroll"><table id="runs-table"></table></div></div>
+  <div class="card"><div class="row"><b>Reasoning tasks: every run</b><span class="muted" style="font-size:12px" title="each run scored on its own question sample; see the paired benchmark (Benchmark tab) for the audit-fixed protocol v2">protocol v1</span><select id="tm-src"><option value="best">test if finished, else latest epoch</option><option value="val">latest epoch (validation)</option></select></div>
+   <p class="hint">One row per run, one column per reasoning task (see the Reasoning tasks tab). <b>Main method</b>: the approach behind the run (lexical retrieval, text embeddings, LLM, JEPA, JEPA + GNN, Graph-JEPA, world model). <b>KU as</b>: whether knowledge units are graph nodes (typed edges) or plain text; hover a label for details. Sorted best to worst by the average % (mean of the five task scores, each task counts the same; * = fewer than 5 tasks scored). The reasoning index (×chance) is shown for reference. All task scores in %: retrieval tasks (forward, inverse, abduction) = balanced MRR (hover for ×chance, Hits@1, Hits@10); consistency = balanced accuracy (chance 50%); intervention = share of predictions that move toward the donor's result when the condition is swapped (chance 50%).</p>
    <div class="scroll"><table id="tm-table"></table></div></div>
   <div class="card"><div class="row"><b>Epoch by epoch: every run</b><select id="em-metric"><option value="ratio">val MRR ÷ chance</option><option value="mrr">val balanced MRR</option><option value="learned">types learned</option><option value="loss">train JEPA loss</option><option value="identity">identity neurons</option><option value="probe">paper-identity probe</option></select></div>
    <p class="hint">One row per run (every variation: mixed, each type alone, …), one column per epoch, from the end-of-epoch validation. ★ = that run's best epoch. Empty = epoch not reached yet.</p>
@@ -144,8 +206,13 @@ dl{display:grid;grid-template-columns:220px 1fr;gap:6px 14px;margin:0}dt{font-we
   <div class="card"><div class="row"><b>Compare runs</b><select id="cmp-metric"></select><span class="muted">x-axis follows the header setting</span></div><div class="chart" style="height:340px"><canvas id="c-cmp"></canvas></div></div>
  </section>
 </main>
+</div>
 <script>
-const TABS=[["overview","Overview"],["explain","Explain"],["train","Training dynamics"],["val","Validation (live)"],["epochs","Epochs"],["tasks","Reasoning tasks"],["world","World model"],["neurons","Neurons"],["where","Where it learns"],["examples","Examples"],["graphs","Graphs"],["bench","Benchmark"],["compare","Compare"],["runs","All runs"],["infra","Infrastructure (live)"]];
+const TABS=[["overview","Overview"],["explain","Explain"],["train","Training dynamics"],["val","Validation (live)"],["epochs","Epochs"],["tasks","Reasoning tasks"],["world","World model"],["neurons","Neurons"],["where","Where it learns"],["examples","Examples"],["graphs","Graphs"],["bench","Benchmark"],["compare","Compare"],["runs","All runs"],["safety","Safety"],["reg","Regulation & ethics"],["infra","Infrastructure (live)"],["cost","Cost & efficiency"]];
+// side panel: groups (run → evaluation → trust → system) and an icon per view
+const NAV=[["This run",["overview","explain","train","val","epochs","tasks","world","neurons","where","examples","graphs"]],
+  ["Evaluation",["bench","compare","runs"]],["Trust & governance",["safety","reg"]],["System",["infra","cost"]]];
+const NAV_IC={cost:'<circle cx="12" cy="12" r="9"/><path d="M15 9.5a3 3 0 0 0-5 0v5a3 3 0 0 0 5 0M8 11h5M8 13h5"/>',overview:'<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',explain:'<path d="M4 5h16M4 10h16M4 15h10M4 20h7"/>',train:'<path d="M3 20l6-7 4 4 8-10"/><path d="M15 7h6v6"/>',val:'<path d="M5 12l5 5L20 7"/>',epochs:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16M15 4v16"/>',tasks:'<path d="M12 3l9 9-9 9-9-9z"/>',world:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>',neurons:'<circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M7.5 7.5l3.5 9M16.5 7.5l-3.5 9M8 6h8"/>',where:'<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',examples:'<path d="M5 5h14v10H9l-4 4z"/>',graphs:'<circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 11l10-5M7 13l10 5"/>',bench:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',compare:'<path d="M7 4L3 8l4 4M3 8h14M17 12l4 4-4 4M21 16H7"/>',runs:'<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',safety:'<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',reg:'<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/>',infra:'<rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/><path d="M7 7h.01M7 17h.01"/>'};
 const $=id=>document.getElementById(id);
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const PAL=["#2563eb","#dc2626","#16a34a","#d97706","#9333ea","#0891b2","#db2777","#65a30d","#ea580c","#4f46e5","#0d9488","#a16207"];
@@ -153,9 +220,42 @@ const TYPE_COL={context:"#8c6bb1",question:"#6a51a3",method:"#2171b5",procedure:
 const CAT_COL={dead:"#6b7280",identity:"#dc2626",type:"#2563eb",field:"#9333ea",leak:"#d97706",content:"#16a34a"};
 const CATS=["dead","identity","type","field","leak","content"];
 let RUN=null,DATA=null,RUNS=[],ALL={},charts={},tab="overview",lastRunsFetch=0;
-$("tabs").innerHTML=TABS.map(([k,l])=>`<button data-t="${k}">${l}</button>`).join("");
-$("tabs").onclick=e=>{if(e.target.dataset.t){tab=e.target.dataset.t;showTab();}};
-function showTab(){document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.t===tab));document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="t-"+tab));if(tab==="runs")runsTab(true);if(tab==="compare")compareTab(true);if(tab==="bench")benchTab(true);if(DATA)render();}
+const TAB_LABEL=Object.fromEntries(TABS);
+const store={get:k=>{try{return localStorage.getItem(k);}catch(e){return null;}},set:(k,v)=>{try{localStorage.setItem(k,v);}catch(e){}}};
+$("tabs").innerHTML=NAV.map(([g,ks])=>`<div class="grp">${g}</div>`+ks.filter(k=>TAB_LABEL[k]).map(k=>
+  `<button data-t="${k}" title="${TAB_LABEL[k]}"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_IC[k]||""}</svg><span class="lb">${TAB_LABEL[k]}</span></button><div class="toc" data-toc="${k}"></div>`).join("")).join("")+
+  `<div class="foot"><button id="nav-side" title="move the panel to the other side">⇄ side</button><button id="nav-mini" title="icons only / full labels">◧ compact</button></div>`;
+$("tabs").onclick=e=>{const b=e.target.closest("button[data-t]");if(b){tab=b.dataset.t;store.set("sj-tab",tab);showTab(true);window.scrollTo(0,0);return;}
+  const a=e.target.closest(".toc a");if(a){const el=document.getElementById(a.dataset.go);if(el)el.scrollIntoView({behavior:"smooth",block:"start"});}};
+(()=>{const app=$("app"),s=store.get("sj-side"),m=store.get("sj-mini");if(s)app.dataset.side=s;if(m==="1")app.classList.add("mini");
+  $("nav-side").onclick=()=>{app.dataset.side=app.dataset.side==="right"?"left":"right";store.set("sj-side",app.dataset.side);};
+  $("nav-mini").onclick=()=>{app.classList.toggle("mini");store.set("sj-mini",app.classList.contains("mini")?"1":"0");};
+  const t=store.get("sj-tab");if(t&&TAB_LABEL[t]&&!new URLSearchParams(location.search).get("tab"))tab=t;
+  const q=new URLSearchParams(location.search).get("tab");if(q&&TAB_LABEL[q])tab=q;})();
+const fitHdr=()=>document.documentElement.style.setProperty("--hdr",document.querySelector("header").offsetHeight+"px");
+window.addEventListener("resize",fitHdr);fitHdr();
+function navToc(){   // "on this page": every card title of the open view, so each detail is one click away
+  document.querySelectorAll("nav .toc").forEach(d=>d.classList.toggle("on",d.dataset.toc===tab));
+  const sec=$("t-"+tab),box=document.querySelector(`nav .toc[data-toc="${tab}"]`);if(!sec||!box)return;
+  const heads=[...sec.querySelectorAll(".card")].map((c,i)=>{const h=c.querySelector("h3")||c.querySelector(".row>b")||c.querySelector("b");
+    const t=h?h.textContent.trim():"";if(!t)return null;if(!c.id)c.id=`card-${tab}-${i}`;return [c.id,t];}).filter(Boolean);
+  box.innerHTML=heads.length>1?heads.map(([id,t])=>`<a data-go="${id}" title="${esc(t)}">${esc(t.length>34?t.slice(0,33)+"…":t)}</a>`).join(""):"";}
+// The address bar always holds the open view (tab, run, compared runs, experiment), so a copied link opens it.
+// A tab change is a new history entry (Back returns to the previous tab); everything else replaces the entry.
+const URLQ=new URLSearchParams(location.search);
+function syncURL(push){const p=new URLSearchParams();p.set("tab",tab);
+  if(RUN&&!$("follow").checked)p.set("run",(RUNS.find(r=>r.path===RUN)||{}).name||RUN);
+  else if(!RUN&&URLQ.get("run"))p.set("run",URLQ.get("run"));          // the linked run, before runs.json arrives
+  if(tab==="compare"&&cmpInit){p.set("a",$("cmpA").value);p.set("b",$("cmpB").value);}
+  if(tab==="bench"&&$("bench-exp").value){p.set("exp",$("bench-exp").value);if($("bench-fam").value)p.set("fam",$("bench-fam").value);}
+  const u=location.pathname+"?"+p;if(u===location.pathname+location.search)return;
+  try{history[push?"pushState":"replaceState"](null,"",u+location.hash);}catch(e){}}
+addEventListener("popstate",()=>{const q=new URLSearchParams(location.search).get("tab");if(q&&TAB_LABEL[q]&&q!==tab){tab=q;showTab();}});
+function showTab(push){document.querySelectorAll("nav button[data-t]").forEach(b=>b.classList.toggle("on",b.dataset.t===tab));document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="t-"+tab));
+  const g=(NAV.find(([,ks])=>ks.includes(tab))||[""])[0];$("crumb").innerHTML=`${esc(g)} › <b>${esc(TAB_LABEL[tab]||tab)}</b>`;
+  if(tab==="runs")runsTab(true);if(tab==="compare")compareTab(true);if(tab==="bench")benchTab(true);if(tab==="safety")safetyTab();if(tab==="cost")costTab(true);if(tab==="reg")regCard();if(DATA)render();
+  const on=document.querySelector(`nav button[data-t="${tab}"]`);if(on&&innerWidth<=900)on.scrollIntoView({inline:"center",block:"nearest"});
+  setTimeout(navToc,0);setTimeout(navToc,1500);syncURL(push===true);}
 function resetCharts(){Object.values(charts).forEach(c=>c.destroy());charts={};["g-train","g-val","g-where","g-neurons","g-epochs","g-tasks","g-cmp","g-world","g-bench"].forEach(g=>$(g).innerHTML="");}
 $("theme").onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==="dark"?"light":(r.dataset.theme==="light"?"dark":(matchMedia("(prefers-color-scheme:dark)").matches?"light":"dark"));resetCharts();render();if(tab==="runs")runsTab(true);};
 $("xaxis").onchange=()=>{resetCharts();render();if(tab==="runs")runsTab(true);};
@@ -164,6 +264,8 @@ const fmt=(v,d=3)=>v==null||isNaN(v)?"–":(+v).toFixed(d);
 const pct=v=>v==null||isNaN(v)?"–":(100*v).toFixed(0)+"%";
 const esc=s=>String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 async function j(url){const r=await fetch(url+(url.includes("?")?"&":"?")+"t="+Date.now());if(!r.ok)throw new Error(url);return r.json();}
+// runs.json (this folder) after runs_archive.json (earlier runs rebuilt from job logs by scripts/import_logs.py)
+async function allRuns(){const [L,A]=await Promise.all([j("runs.json").catch(()=>null),j("runs_archive.json").catch(()=>[])]);if(!L&&!A.length)throw new Error("runs.json");return [...A,...(L||[])];}
 const X=()=>$("xaxis").value;
 const xv=r=>X()==="epoch"&&r.epoch!=null?r.epoch:r.step;
 const ncount=L=>Object.values(L.counts).reduce((a,b)=>a+b,0);
@@ -456,13 +558,51 @@ function tasksTab(D){
     {label:"intervention toward donor",data:RE.filter(r=>r.tasks.intervention&&r.tasks.intervention.condition&&r.tasks.intervention.condition.toward_donor!=null).map(r=>({x:xs(r),y:r.tasks.intervention.condition.toward_donor})),borderColor:PAL[5],backgroundColor:PAL[5],pointRadius:4,borderWidth:2,borderDash:[4,3]},
     {label:"chance (0.5)",data:RE.map(r=>({x:xs(r),y:0.5})),borderColor:css("--chance"),borderDash:[6,4],pointRadius:0}],{ymin:0});
 }
+function tmPct(T,k){   // one percentage per task for the every-run table -> {v, txt, lvl, sub}
+  const sc=taskScore(T,k),t=T&&T[k];if(!sc||sc.v==null)return null;
+  if(k==="consistency")return sc;
+  if(k==="intervention"){const v=(t.condition||{}).toward_donor;if(v==null)return null;
+    return {v,txt:pct(v),lvl:v>=0.6?"good":v>=0.52?"warn":"bad",sub:"share of predictions that move toward the donor's result (chance 50%) · "+sc.sub};}
+  const v=t.MRR;if(v==null)return null;
+  return {v,txt:(100*v).toFixed(1)+"%",lvl:sc.lvl,sub:`${sc.txt} chance · `+sc.sub};
+}
+function tmIndex(T){   // reasoning index as in evaluation/tasks.py: macro if stored, else mean of the five x-chance scores
+  if(!T)return null;if(T.macro&&T.macro.index!=null)return T.macro.index;
+  const v=["forward","inverse","abduction"].map(k=>T[k]&&T[k].ratio),c=T.consistency&&T.consistency.bal_acc,i=T.intervention&&T.intervention.condition&&T.intervention.condition.toward_donor;
+  v.push(c==null?null:c/0.5,i==null?null:i/0.5);const ok=v.filter(x=>x!=null&&!isNaN(x));return ok.length?ok.reduce((a,b)=>a+b,0)/ok.length:null;
+}
+function runClass(c){   // -> main method and how a KU is represented, from the run's config
+  c=c||{};const b=c.baseline||"",enc=c.encoder||"transformer",gnn={rgat:"R-GAT",gine:"GINE",gps:"GPS"}[enc];
+  const wm=(c.wm_p_action||0)>0||(c.edit_p||0)>0,motif=(c.motif_p||0)>0;
+  let m;
+  if(b==="bm25")m=["Lexical retrieval","#64748b","BM25 term matching, no learning"];
+  else if(b==="llm")m=["LLM (zero-shot)","#ea580c","open LLM scores candidates by log-likelihood: "+(c.llm_model||"")];
+  else if(b==="supervised")m=["Embeddings + regressor","#0891b2","supervised MLP from visible-KU embeddings to the hidden KU's embedding"];
+  else if(b)m=["Text embeddings","#0ea5e9","frozen text encoder, cosine similarity ("+b+")"];
+  else if(c.ku_subgraph)m=[wm?"Sub-graph world model (JEPA)":"Sub-graph JEPA","#be185d","JEPA over KU sentence sub-graphs"+(wm?" with edit actions":"")];
+  else if(wm)m=["World model (JEPA)","#7c3aed","JEPA that also predicts the effect of actions (swap / edit a KU)"+(motif?", motif masking":"")+(gnn?", "+gnn+" encoder":"")];
+  else if(motif)m=["Graph-JEPA (motif masking)","#a855f7","JEPA that masks a connected motif of KUs"+(gnn?", "+gnn+" encoder":", graph transformer")];
+  else if(gnn)m=["JEPA + GNN ("+gnn+")","#16a34a","JEPA with a "+gnn+" graph encoder"];
+  else m=["JEPA","#22c55e","JEPA with the relation-biased graph transformer"];
+  let k;
+  if(c.ku_subgraph)k=["graph · KU = sub-graph","#be185d","each KU is a sub-graph of its sentences, papers are graphs of KUs"];
+  else if(b)k=["plain text · KU texts","#94a3b8","KU texts as plain text: no graph, no typed edges"];
+  else if(c.ku_mode==="paper_masked"||c.ku_mode==="paper")k=["plain text · whole paper","#94a3b8","the paper itself is one joint text (neighbouring papers stay KU graphs)"];
+  else k=["graph · KU = node","#16a34a","each KU is a node; a paper is a graph of KUs with typed edges, linked to neighbouring papers"];
+  return {method:m,ku:k};
+}
+const clsPill=([l,col,tip])=>`<span class="pill" style="background:${col};white-space:nowrap" title="${esc(tip)}">${esc(l)}</span>`;
 function taskMatrix(ok){
   const useTest=$("tm-src").value==="best";
-  $("tm-table").innerHTML=`<tr><th>run</th><th>from</th>${TASK_KEYS.map(k=>`<th class="num">${TASK_NAME[k]}</th>`).join("")}</tr>`+ok.slice().reverse().map(d=>{
-    const F=d.final||{},R=d.epoch_results||[],last=R[R.length-1];
-    if(d.config.ku_mode==="paper")return `<tr><td>${esc(d.name)}</td><td class="muted" colspan="${TASK_KEYS.length+1}">n/a in paper mode</td></tr>`;
-    const T=useTest&&F.tasks&&!F.tasks.note?F.tasks:(last&&last.tasks)||null,src=useTest&&F.tasks&&!F.tasks.note?"test":last&&last.tasks?`epoch ${last.epoch}`:"–";
-    return `<tr><td>${esc(d.name)}</td><td class="muted">${src}</td>${TASK_KEYS.map(k=>{const sc=T?taskScore(T,k):null;return sc&&sc.v!=null?`<td class="num" style="background:${lvlBg(sc.lvl)}" title="${esc(sc.sub)}">${sc.txt}</td>`:'<td class="num muted">·</td>';}).join("")}</tr>`;}).join("");
+  const rows=ok.map(d=>{const F=d.final||{},R=d.epoch_results||[],last=R[R.length-1];
+    if(d.config.ku_mode==="paper")return {d,paper:true,ri:-Infinity};
+    const test=useTest&&F.tasks&&!F.tasks.note,T=test?F.tasks:(last&&last.tasks)||null,src=test?"test":last&&last.tasks?`epoch ${last.epoch}`:"–";
+    const ri=tmIndex(T),ps=T?TASK_KEYS.map(k=>tmPct(T,k)).filter(x=>x&&x.v!=null).map(x=>x.v):[],av=ps.length?ps.reduce((a,b)=>a+b,0)/ps.length:null;
+    return {d,T,src,ri:ri==null?-Infinity:ri,av:av==null?-Infinity:av,np:ps.length};}).sort((a,b)=>b.av-a.av||b.ri-a.ri);
+  $("tm-table").innerHTML=`<tr><th>#</th><th>run</th><th>main method</th><th>KU as</th><th>from</th><th class="num">average %</th><th class="num">reasoning index</th>${TASK_KEYS.map(k=>`<th class="num">${TASK_NAME[k]}</th>`).join("")}</tr>`+rows.map((r,i)=>{
+    const C=runClass(r.d.config),cls=`<td>${clsPill(C.method)}</td><td>${clsPill(C.ku)}</td>`;
+    if(r.paper)return `<tr><td>${i+1}</td><td>${esc(r.d.name)}</td>${cls}<td class="muted" colspan="${TASK_KEYS.length+3}">n/a in paper mode</td></tr>`;
+    return `<tr><td>${i+1}</td><td>${esc(r.d.name)}</td>${cls}<td class="muted">${r.src}</td><td class="num" style="font-weight:600" title="mean of the task scores in % (each task counts the same); sort key${r.np<5?` · only ${r.np} of 5 tasks scored`:""}">${isFinite(r.av)?(100*r.av).toFixed(1)+"%"+(r.np<5?"*":""):"–"}</td><td class="num" title="mean of the five scores on the x-chance scale (retrieval up to ~19x, consistency and intervention up to 2x)">${isFinite(r.ri)?r.ri.toFixed(2)+"×":"–"}</td>${TASK_KEYS.map(k=>{const sc=r.T?tmPct(r.T,k):null;return sc?`<td class="num" style="background:${lvlBg(sc.lvl)}" title="${esc(sc.sub)}">${sc.txt}</td>`:'<td class="num muted">·</td>';}).join("")}</tr>`;}).join("");
 }
 
 // ---------------------------------------------------------------- world model
@@ -629,17 +769,18 @@ const CMP={"val balanced MRR":["evals","bal_MRR"],"val balanced MRR ÷ chance":[
 $("cmp-metric").innerHTML=Object.keys(CMP).map(k=>`<option>${k}</option>`).join("");$("cmp-metric").onchange=()=>runsTab(true);
 async function runsTab(force){
   const now=Date.now();if(!force&&now-lastRunsFetch<4000)return;lastRunsFetch=now;
-  try{RUNS=await j("runs.json");}catch(e){return;}
-  const got=await Promise.all(RUNS.map(r=>(r.path===RUN&&DATA)?Promise.resolve(DATA):j(r.path).catch(()=>null)));
+  try{RUNS=await allRuns();}catch(e){return;}
+  const [got]=await Promise.all([Promise.all(RUNS.map(r=>(r.path===RUN&&DATA)?Promise.resolve(DATA):j(r.path).catch(()=>null))),jobGpus()]);
   got.forEach((d,i)=>{if(d)ALL[RUNS[i].path]=d;});
   const ok=RUNS.map(r=>ALL[r.path]).filter(Boolean);
-  $("runs-table").innerHTML=`<tr><th>run</th><th>status</th><th>progress</th><th>epoch</th><th>KUs</th><th>masking</th><th>N</th><th>train loss</th><th>cos</th><th>val bal. MRR</th><th>chance</th><th>probe</th><th>id. neurons</th><th>pred learned</th><th>test bal. MRR</th><th>verdict</th></tr>`+ok.slice().reverse().map(d=>{
+  $("runs-table").innerHTML=`<tr><th>run</th><th>status</th><th>model</th><th>GPU</th><th class="num">params</th><th class="num">papers (train / val / test)</th><th class="num">KUs</th><th class="num">instances</th><th>progress</th><th>epoch</th><th>KU mode</th><th>masking</th><th>N</th><th>train loss</th><th>cos</th><th>val bal. MRR</th><th>chance</th><th>probe</th><th>id. neurons</th><th>pred learned</th><th>test bal. MRR</th><th>verdict</th></tr>`+ok.slice().reverse().map(d=>{
     const H=d.history||[],E=d.evals||[],h=H[H.length-1]||{},e=E[E.length-1]||{},F=d.final||{},rb=F.retrieval_balanced||{},nl=(d.neuron_timeline||[]).slice(-1)[0];
     const L=nl?nl.layers[nl.layers.length-1]:null,idp=L?L.counts.identity/ncount(L):null;
     const r=e.bal_MRR/(e.bal_chance||1);const verdict=e.bal_MRR==null?"–":r>2?'<span class="ok">learning</span>':r>1.3?'<span class="wa">weak</span>':(h.cos_pred_target>0.95?'<span class="no">shortcut (cos≈1, MRR≈chance)</span>':'<span class="no">at chance</span>');
     const prog=h.step!=null?Math.round(100*(h.step+1)/(d.steps_total||1)):0,stt=String(d.status).split(":")[0];
-    return `<tr><td><a href="#" data-run="runs/${esc(d.name)}/live.json">${esc(d.name)}</a></td><td><span class="badge ${stt}">${esc(stt)}</span></td><td class="num">${prog}%</td><td class="num">${fmt(h.epoch,2)}${d.epochs_total?"/"+fmt(d.epochs_total,2):""}</td><td>${MODE_NAME[d.config.ku_mode]||"sections"}</td><td>${esc((d.schedule||{}).schedule||"")}${h.phase&&h.phase!=="mixed"?" · "+esc(h.phase):""}</td><td class="num">${d.config.n_subgraphs}</td><td class="num">${fmt(h.jepa,4)}</td><td class="num">${fmt(h.cos_pred_target,3)}</td><td class="num">${fmt(e.bal_MRR)}</td><td class="num">${fmt(e.bal_chance)}</td><td class="num">${fmt(e.probe_acc,2)}</td><td class="num">${pct(idp)}</td><td class="num">${nl?nl.pred_learned+"/"+nl.pred_n:"–"}</td><td class="num">${fmt(rb.MRR)}</td><td>${verdict}</td></tr>`;}).join("");
-  $("runs-table").querySelectorAll("a[data-run]").forEach(a=>a.onclick=ev=>{ev.preventDefault();$("follow").checked=false;selectRun(a.dataset.run);tab="overview";showTab();});
+    return `<tr><td><a href="#" data-run="${esc((RUNS.find(r=>ALL[r.path]===d)||{}).path||`runs/${d.name}/live.json`)}">${esc(d.name)}</a></td><td><span class="badge ${stt}">${esc(stt)}</span></td><td style="white-space:nowrap">${runModel(d)}</td><td style="white-space:nowrap">${gpuCell(runGpu(d).name?runGpu(d):null)}</td>`+
+      `<td class="num">${big(F.params_trainable||d.params_trainable||null)}</td><td class="num">${runPapers(d)}</td><td class="num">${big((d.index||{}).kus)}</td><td class="num" title="${F.samples_seen?"seen":"planned: steps × batch size"}">${big(F.samples_seen||(d.steps_total&&d.config.batch_size?d.steps_total*d.config.batch_size:null))}</td><td class="num">${prog}%</td><td class="num">${fmt(h.epoch,2)}${d.epochs_total?"/"+fmt(d.epochs_total,2):""}</td><td>${MODE_NAME[d.config.ku_mode]||"sections"}</td><td>${esc((d.schedule||{}).schedule||"")}${h.phase&&h.phase!=="mixed"?" · "+esc(h.phase):""}</td><td class="num">${d.config.n_subgraphs}</td><td class="num">${fmt(h.jepa,4)}</td><td class="num">${fmt(h.cos_pred_target,3)}</td><td class="num">${fmt(e.bal_MRR)}</td><td class="num">${fmt(e.bal_chance)}</td><td class="num">${fmt(e.probe_acc,2)}</td><td class="num">${pct(idp)}</td><td class="num">${nl?nl.pred_learned+"/"+nl.pred_n:"–"}</td><td class="num">${fmt(rb.MRR)}</td><td>${verdict}</td></tr>`;}).join("");
+  $("runs-table").querySelectorAll("a[data-run]").forEach(a=>a.onclick=ev=>{ev.preventDefault();$("follow").checked=false;selectRun(a.dataset.run);tab="overview";showTab(true);});
   ptTable(ok);epochMatrix(ok);taskMatrix(ok);
   const [src,key]=CMP[$("cmp-metric").value];
   const ds=ok.map((d,i)=>{let rows=d[src]||[];
@@ -649,6 +790,13 @@ async function runsTab(force){
   line("cmp",ds,{ymin:0});
 }
 
+// what was trained: the comparison system, or graph encoder (width × encoder + predictor layers) and text encoder
+function runModel(d){
+  const c=d.config||{},te=c.embed_model?String(c.embed_model).split("/").pop():"";
+  if(c.baseline)return `<span title="comparison system">${esc(c.baseline)}</span>`;
+  return `<span title="graph encoder ${esc(c.encoder||"transformer")}, d_model ${c.d_model}, ${c.enc_layers} encoder + ${c.pred_layers} predictor layers; KU text encoder ${esc(c.embed_model||"–")}">${esc(c.encoder||"transformer")} ${c.d_model}d · ${c.enc_layers}+${c.pred_layers}L${te?` <span class="muted">${esc(te)}</span>`:""}</span>`;
+}
+const runPapers=d=>{const I=d.index||{},S=I.splits;return S?`${big(I.papers)} <span class="muted">(${big(S.train)} / ${big(S.val)} / ${big(S.test)})</span>`:big(I.papers);};
 function ptTable(ok){
   const T=["context","question","method","procedure","result","interpretation","limitation","claim","evidence","implication","paper"];
   const test=$("pt-src").value==="test",ratio=$("pt-val").value==="ratio";
@@ -729,16 +877,163 @@ const armName=a=>{const i=a.indexOf("__");return i<0?esc(a):`${esc(a.slice(i+2))
 const bfmt=(v,k)=>v==null||isNaN(v)?"–":k==="n"?v.toFixed(v%1?1:0):k==="x"?v.toFixed(2)+"×":k==="dx"?(v>=0?"+":"")+v.toFixed(2)+"×":k==="%"?pct(v):k==="c"?v.toFixed(2):k==="s"?Math.round(v)+" s":fmt(v);
 const mstd=a=>{const v=a.filter(x=>x!=null&&!isNaN(x));if(!v.length)return [null,null,0];const m=v.reduce((p,c)=>p+c,0)/v.length;return [m,v.length>1?Math.sqrt(v.reduce((p,c)=>p+(c-m)**2,0)/(v.length-1)):null,v.length];};
 let benchInit=false;
+// ---- Cost & efficiency: measured (final.cost, infra/cost.py) where a run recorded it, else estimated from its time
+const TOK_PER_INST=189;
+// per GPU type: board power (W, energy estimate), dense bf16 peak (FLOP/s, MFU), default € per GPU-hour (editable).
+// Matched by substring in order, so "H100 NVL" before "H100".
+const GPU_SPEC={"L40S":{w:350,bf16:362e12,eur:1.0},"H100 NVL":{w:400,bf16:835e12,eur:2.5},"H100":{w:700,bf16:989e12,eur:3.0},
+  "H200":{w:700,bf16:989e12,eur:3.5},"A100":{w:400,bf16:312e12,eur:1.5},"RTX A5000":{w:230,bf16:111e12,eur:0.4},
+  "RTX 3090":{w:350,bf16:71e12,eur:0.3},"V100":{w:300,bf16:125e12,eur:0.8}};
+const gpuKey=n=>n?Object.keys(GPU_SPEC).find(k=>n.includes(k))||n.replace(/^NVIDIA\s+(GeForce\s+)?/,"").replace(/\s+MIG.*/,""):null;
+const migFrac=n=>{const m=/(\d)g\.\d+gb/i.exec(n||"");return m?+m[1]/7:1;};
+// SLURM job -> GPU name, from the Infrastructure page's per-job files (hosted: listed from the manifest)
+let JOBGPU={},jobGpuAt=0;
+async function jobGpus(){
+  if(Date.now()-jobGpuAt<60000)return JOBGPU;jobGpuAt=Date.now();
+  let keys=[];
+  try{keys=window.SCIJEPA_HOSTED?Object.keys(await window.SCIJEPA_HOSTED.manifest()).map(p=>(p.match(/^infra\/jobs\/([^/]+)\.json$/)||[])[1]).filter(Boolean):await j("infra/jobs.json");}catch(e){}
+  const M={};
+  await Promise.all(keys.map(k=>j(`infra/jobs/${encodeURIComponent(k)}.json`).then(d=>{
+    const s=d.system||{},g=((d.now||{}).gpus||[])[0],name=g?g.name:(/GPU \d+:\s*([^(]+)\(/.exec(s.gpus||"")||[])[1];
+    if(s.job&&name)M[s.job]=name.trim();},()=>null)));
+  return JOBGPU=M;
+}
+// the GPU a run trained on: recorded by the run (cost meter, run start), else its latest SLURM job's record
+function runGpu(d){
+  const C=(d.final||{}).cost||{};
+  if(C.device)return {name:C.device,src:"recorded"};
+  if(d.gpu)return {name:d.gpu,src:"recorded"};
+  const jobs=[...(((d.imported||{}).jobs)||[]),d.job,...(d.resumed||[]).map(r=>r&&r.job)].filter(Boolean).reverse();
+  for(const jb of jobs)if(JOBGPU[jb])return {name:JOBGPU[jb],src:"job "+jb};
+  return {name:null,src:jobs.length?"job "+jobs[0]+" has no infrastructure record":"not recorded"};
+}
+const gpuCell=(g,assumed)=>g?`<span title="${esc(assumed?"assumed (not recorded)":g.src)}">${esc(gpuKey(g.name))}${assumed?' <i class="muted">assumed</i>':""}</span>`:'<span class="muted" title="not recorded">–</span>';
+const runAvgPct=d=>{const T=(d.final||{}).tasks;if(!T||T.note)return null;const v=TASK_KEYS.map(k=>tmPct(T,k)).filter(x=>x&&x.v!=null).map(x=>x.v);return v.length?100*v.reduce((a,b)=>a+b,0)/v.length:null;};
+function runCost(d,P){
+  const F=d.final||{},C=F.cost||{},sec=F.train_sec||0,G=runGpu(d),dev=(d.config||{}).device||"";
+  const gpu=!!G.name||/cuda|gpu/i.test(dev),name=G.name||(gpu?P.assume:null),gk=gpuKey(name),S=GPU_SPEC[gk]||{};
+  const frac=C.slice_fraction??migFrac(name),gpuH=gpu?sec/3600:0,fullH=gpuH*frac;
+  let kwh,src;
+  if(C.gpu_kwh!=null&&C.measured_sec>0){kwh=C.gpu_kwh*Math.max(1,sec/C.measured_sec)*P.pue;src=C.measured_sec<0.95*sec?"mixed":"measured";}
+  else{kwh=fullH*(S.w||300)/1000*P.pue;src="estimated";}
+  const fam=famOf(d),params=F.params_trainable||null,seen=F.samples_seen||0;
+  const flops=fam!=="comparison"&&params&&seen?6*params*seen*TOK_PER_INST:null;
+  return {sec,gpuH,gk,g:G.name?G:(gpu?{name,src:"assumed"}:null),assumed:gpu&&!G.name,kwh,kg:kwh*P.grid,eur:fullH*(P.price[gk]??0),src,fam,params,flops,
+    mfu:flops&&S.bf16&&sec?flops/(sec*S.bf16*frac):null,sps:seen&&sec?seen/sec:null,
+    msq:fam==="comparison"&&F.n_eval&&sec?1000*sec/F.n_eval:null,
+    gmem:C.gpu_mem_peak_gb??null,cmem:C.cpu_mem_peak_gb??null,q:runAvgPct(d)};
+}
+const hms=s=>s==null?"–":s>=3600?(s/3600).toFixed(1)+" h":s>=60?(s/60).toFixed(1)+" min":Math.round(s)+" s";
+const num=(v,d=1)=>v==null||isNaN(v)?"–":(+v).toFixed(d);
+const big=v=>v==null||isNaN(v)?"–":v>=1e9?(v/1e9).toFixed(1)+"B":v>=1e6?(v/1e6).toFixed(1)+"M":v>=1e3?(v/1e3).toFixed(1)+"k":String(Math.round(v));
+const avg=a=>{const v=a.filter(x=>x!=null&&!isNaN(x));return v.length?v.reduce((p,c)=>p+c,0)/v.length:null;};
+const sum=a=>a.reduce((p,c)=>p+(c||0),0);
+let costInit=false,lastCostFetch=0;const PRICE={};
+async function costTab(force){
+  const now=Date.now();if(!force&&costInit&&now-lastCostFetch<10000)return;lastCostFetch=now;
+  try{RUNS=await allRuns();}catch(e){$("cost-meta").textContent="no runs yet";return;}
+  const [got]=await Promise.all([Promise.all(RUNS.map(r=>ALL[r.path]&&String(ALL[r.path].status).startsWith("done")?ALL[r.path]:j(r.path).catch(()=>null))),jobGpus()]);
+  got.forEach((d,i)=>{if(d)ALL[RUNS[i].path]=d;});
+  const D=got.filter(d=>d&&d.final&&d.final.train_sec!=null);
+  const exps=[...new Set(D.map(d=>d.experiment||"single"))],sel=$("cost-exp");
+  const opts=`<option value="">all experiments</option>`+exps.map(e=>`<option>${esc(e)}</option>`).join("");
+  if(sel.dataset.o!==opts){const v=sel.value;sel.innerHTML=opts;sel.dataset.o=opts;sel.value=exps.includes(v)?v:"";}
+  // GPU for runs without a record: the GPU types in the records first, L40S by default
+  const seenG=[...new Set(D.map(d=>gpuKey(runGpu(d).name)).filter(Boolean))],as=$("cost-assume");
+  const aopts=[...new Set([...seenG,...Object.keys(GPU_SPEC)])].map(g=>`<option>${esc(g)}</option>`).join("");
+  if(as.dataset.o!==aopts){const v=as.value||"L40S";as.innerHTML=aopts;as.dataset.o=aopts;as.value=v;}
+  if(!costInit){costInit=true;["cost-exp","cost-assume","cost-grid","cost-pue"].forEach(id=>$(id).oninput=$(id).onchange=()=>costTab(true));}
+  const E=sel.value,DE=D.filter(d=>!E||(d.experiment||"single")===E),assume=as.value;
+  // one price per GPU type in use (€ per GPU-hour), kept while the page is open
+  const used=[...new Set(DE.map(d=>gpuKey(runGpu(d).name)||((d.config||{}).device||"").match(/cuda|gpu/i)&&gpuKey(assume)).filter(Boolean))];
+  used.forEach(g=>{if(PRICE[g]==null)PRICE[g]=(GPU_SPEC[g]||{}).eur??1;});
+  const pr=$("cost-prices"),pk=used.join("|");
+  if(pr.dataset.o!==pk){pr.dataset.o=pk;pr.innerHTML=used.map(g=>`<label>€ per ${esc(g)}-hour <input data-gpu="${esc(g)}" type="number" min="0" step="0.1" value="${PRICE[g]}" style="width:64px"></label>`).join("");
+    pr.querySelectorAll("input").forEach(i=>i.oninput=i.onchange=()=>{PRICE[i.dataset.gpu]=+i.value||0;costTab(true);});}
+  const P={price:PRICE,assume,grid:+$("cost-grid").value||0,pue:+$("cost-pue").value||1};
+  const runs=DE.map(d=>({d,c:runCost(d,P)}));
+  if(!runs.length){$("cost-kpi").innerHTML='<div class="empty">No finished run yet.</div>';$("cost-table").innerHTML="";$("cost-data").innerHTML="";$("cost-plot").innerHTML="";$("cost-meta").textContent="";return;}
+  const key=d=>{const a=d.arm||d.name;const i=a.indexOf("__");return i<0?a:a.slice(i+2);};
+  const G={};runs.forEach(r=>(G[key(r.d)]=G[key(r.d)]||[]).push(r));
+  const rows=Object.entries(G).map(([m,rs])=>{const c=rs.map(r=>r.c),srcs=new Set(c.map(x=>x.src));
+    const gs=[...new Set(c.filter(x=>x.gk).map(x=>x.gk))];
+    return {m,fam:c[0].fam,n:rs.length,sec:avg(c.map(x=>x.sec)),gpuH:sum(c.map(x=>x.gpuH)),
+      gpu:gs.length?gs.map(g=>{const a=c.filter(x=>x.gk===g),na=a.filter(x=>x.assumed).length;
+        return gpuCell(a.find(x=>!x.assumed)?.g||a[0].g,na===a.length)+(gs.length>1?` <span class="muted">×${a.length}</span>`:"");}).join(", "):"–",
+      gmem:Math.max(...c.map(x=>x.gmem??-1)),cmem:Math.max(...c.map(x=>x.cmem??-1)),params:c[0].params,flops:avg(c.map(x=>x.flops)),
+      mfu:avg(c.map(x=>x.mfu)),sps:avg(c.map(x=>x.sps)),msq:avg(c.map(x=>x.msq)),kwh:sum(c.map(x=>x.kwh)),kg:sum(c.map(x=>x.kg)),
+      eur:sum(c.map(x=>x.eur)),q:avg(c.map(x=>x.q)),src:srcs.size>1?"mixed":[...srcs][0],
+    I:rs[0].d.index||{},cfg:rs[0].d.config||{},ep:avg(rs.map(r=>((r.d.final||{}).run_length||{}).epochs_trained)),
+    best:avg(rs.map(r=>((r.d.final||{}).run_length||{}).best_epoch)),steps:avg(rs.map(r=>((r.d.final||{}).run_length||{}).steps)),
+    seen:avg(rs.map(r=>(r.d.final||{}).samples_seen||null)),wall:sum(c.map(x=>x.sec))};}).sort((a,b)=>b.gpuH-a.gpuH);
+  const T=k=>sum(rows.map(r=>r[k])),est=runs.filter(r=>r.c.src==="estimated").length,nas=runs.filter(r=>r.c.assumed).length;
+  const byG={};runs.forEach(r=>{if(r.c.gk)byG[r.c.gk]=(byG[r.c.gk]||0)+r.c.gpuH;});
+  $("cost-meta").textContent=`${runs.length} runs · ${rows.length} methods · ${est} run${est===1?"":"s"} estimated from their time`+(nas?` · GPU of ${nas} run${nas===1?"":"s"} not recorded (assumed ${assume})`:"");
+  $("cost-kpi").innerHTML=kpi("GPU-hours",num(T("gpuH")),Object.entries(byG).sort((a,b)=>b[1]-a[1]).map(([g,h])=>`${esc(g)} ${num(h)} h`).join(" · ")||"one GPU or slice per run")+
+    kpi("energy",num(T("kwh"))+" kWh",`× PUE ${P.pue}`)+kpi("CO₂e",num(T("kg"))+" kg",`${P.grid} kg/kWh`)+kpi("cost","€ "+Math.round(T("eur")),used.map(g=>`€ ${PRICE[g]} / ${esc(g)}-h`).join(" · "))+
+    kpi("training time",hms(T("wall")),`all ${runs.length} runs, longest ${hms(Math.max(...runs.map(r=>r.c.sec)))}`)+
+    kpi("papers",big(Math.max(...rows.map(r=>r.I.papers||0))||null),(()=>{const S=(rows.find(r=>r.I.splits)||{}).I?.splits;return S?`train ${big(S.train)} · val ${big(S.val)} · test ${big(S.test)}`:"";})())+
+    kpi("knowledge units",big(Math.max(...rows.map(r=>r.I.kus||0))||null),"KUs in the graph")+
+    kpi("instances seen",big(sum(runs.map(r=>(r.d.final||{}).samples_seen||0))||null),"training instances, all runs");
+  const SRC={measured:"var(--good)",mixed:"var(--warn)",estimated:"var(--muted)"};
+  const mem=v=>v<0?"–":num(v)+" GB";
+  $("cost-table").innerHTML=`<tr><th>method</th><th>family</th><th class="num">runs</th><th>GPU</th><th class="num">time / run</th><th class="num">GPU-h</th><th class="num">peak GPU mem</th><th class="num">peak CPU mem</th><th class="num">params</th><th class="num">train FLOPs / run</th><th class="num">MFU</th><th class="num">samples / s</th><th class="num">ms / query</th><th class="num">kWh</th><th class="num">kg CO₂e</th><th class="num">€</th><th class="num">€ / run</th><th class="num">quality %</th><th>source</th></tr>`+
+    rows.map(r=>`<tr><td>${esc(r.m)}</td><td style="white-space:nowrap">${famPill(r.fam)}</td><td class="num">${r.n}</td><td style="white-space:nowrap">${r.gpu}</td><td class="num">${hms(r.sec)}</td><td class="num">${num(r.gpuH,2)}</td>`+
+      `<td class="num">${mem(r.gmem)}</td><td class="num">${mem(r.cmem)}</td><td class="num">${big(r.params)}</td><td class="num">${r.flops?r.flops.toExponential(2):"–"}</td><td class="num">${r.mfu==null?"–":(100*r.mfu).toFixed(1)+" %"}</td>`+
+      `<td class="num">${r.sps==null?"–":Math.round(r.sps)}</td><td class="num">${r.msq==null?"–":num(r.msq,1)}</td><td class="num">${num(r.kwh,2)}</td><td class="num">${num(r.kg,2)}</td><td class="num">${num(r.eur,2)}</td><td class="num">${num(r.eur/r.n,2)}</td>`+
+      `<td class="num">${num(r.q,1)}</td><td><span class="pill" style="background:${SRC[r.src]}">${r.src}</span></td></tr>`).join("");
+  $("cost-data").innerHTML=`<tr><th>method</th><th>family</th><th class="num">runs</th><th class="num">papers</th><th class="num">train / val / test</th><th class="num">KUs</th><th class="num">epochs</th><th class="num">best epoch</th><th class="num">steps</th><th class="num">batch</th><th class="num">instances seen</th><th class="num">time / run</th><th class="num">wall-clock</th></tr>`+
+    rows.map(r=>{const S=r.I.splits,cmp=r.fam==="comparison",tr=v=>cmp?"–":v;return `<tr><td>${esc(r.m)}</td><td style="white-space:nowrap">${famPill(r.fam)}</td><td class="num">${r.n}</td><td class="num">${big(r.I.papers)}</td><td class="num">${S?`${big(S.train)} / ${big(S.val)} / ${big(S.test)}`:"–"}</td><td class="num">${big(r.I.kus)}</td>`+
+      `<td class="num">${tr(num(r.ep))}</td><td class="num">${tr(num(r.best))}</td><td class="num">${tr(big(r.steps))}</td><td class="num">${tr(r.cfg.batch_size??"–")}</td><td class="num">${big(r.seen)}</td><td class="num">${hms(r.sec)}</td><td class="num">${hms(r.wall)}</td></tr>`;}).join("");
+  costPlot(rows.filter(r=>r.q!=null).map(r=>({...r,x:Math.max(r.eur/r.n,0.01)})));
+}
+function costPlot(pts){
+  if(!pts.length){$("cost-plot").innerHTML='<div class="empty">Appears when finished runs have reasoning-task scores.</div>';return;}
+  const W=760,H=320,L=52,R=16,Tp=12,B=40,xs=pts.map(p=>Math.log10(p.x)),x0=Math.floor(Math.min(...xs)),x1=Math.max(x0+1,Math.ceil(Math.max(...xs)));
+  const qs=pts.map(p=>p.q),y0=Math.max(0,Math.floor(Math.min(...qs)/10)*10),y1=Math.min(100,Math.max(y0+10,Math.ceil(Math.max(...qs)/10)*10));
+  const X=v=>L+(Math.log10(v)-x0)/(x1-x0)*(W-L-R),Y=v=>Tp+(1-(v-y0)/(y1-y0))*(H-Tp-B);
+  const front=pts.slice().sort((a,b)=>a.x-b.x).reduce((f,p)=>(!f.length||p.q>f[f.length-1].q?[...f,p]:f),[]);
+  const lab=new Set(front.map(p=>p.m));
+  let g="";for(let e=x0;e<=x1;e++)g+=`<line x1="${X(10**e)}" x2="${X(10**e)}" y1="${Tp}" y2="${H-B}" stroke="var(--line)"/><text x="${X(10**e)}" y="${H-B+16}" text-anchor="middle" font-size="11" fill="var(--muted)">€ ${10**e>=1?10**e:(10**e).toFixed(-e)}</text>`;
+  for(let v=y0;v<=y1;v+=10)g+=`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${L-6}" y="${Y(v)+4}" text-anchor="end" font-size="11" fill="var(--muted)">${v}%</text>`;
+  g+=`<text x="${(L+W-R)/2}" y="${H-6}" text-anchor="middle" font-size="11" fill="var(--muted)">€ per run (log scale)</text>`;
+  g+=`<polyline points="${front.map(p=>`${X(p.x)},${Y(p.q)}`).join(" ")}" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>`;
+  g+=pts.map(p=>`<g><circle cx="${X(p.x)}" cy="${Y(p.q)}" r="5" fill="${FAMCOL[p.fam]}" stroke="var(--panel)" stroke-width="2"><title>${esc(p.m)} · ${FAMILY[p.fam]}\n€ ${p.x.toFixed(2)} per run · ${p.q.toFixed(1)} % average · ${p.n} run${p.n>1?"s":""} · ${p.src}</title></circle>`+
+    (lab.has(p.m)?`<text x="${X(p.x)+8}" y="${Y(p.q)-6}" font-size="11" fill="var(--text)">${esc(p.m.length>28?p.m.slice(0,27)+"…":p.m)}</text>`:"")+`</g>`).join("");
+  const fams=[...new Set(pts.map(p=>p.fam))];
+  $("cost-plot").innerHTML=`<div class="row" style="gap:12px;margin-bottom:6px">${fams.map(f=>`<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="${FAMCOL[f]}"/></svg>${FAMILY[f]}</span>`).join("")}</div>`+
+    `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto" role="img" aria-label="quality against cost per run, one dot per method">${g}</svg>`;
+}
+async function v2Card(){
+  let V;try{V=await j("paired_v2.json");}catch(e){$("v2-meta").textContent="";$("v2-verdict").innerHTML='<div class="empty">Not run yet: <code>sbatch cluster/grete/paired_eval.sbatch</code> (GPU) writes paired_v2.json into this dashboard.</div>';$("v2-table").innerHTML="";return;}
+  const S=Object.entries(V.systems||{}).filter(([,r])=>r.point&&r.point.average!=null&&!isNaN(r.point.average)).sort((a,b)=>b[1].point.average-a[1].point.average);
+  const P=v=>v==null||isNaN(v)?"–":(100*v).toFixed(1);
+  const ci=(r,k)=>r.ci&&r.ci[k]?`<div class="muted" style="font-size:11px">${P(r.ci[k][0])}–${P(r.ci[k][1])}</div>`:"";
+  const n=V.n||{};$("v2-meta").textContent=` · ${S.length} systems · ${Object.values(n.ranking||{}).reduce((a,b)=>a+b,0)} ranking questions · ${n.pairs||0} consistency pairs · ${n.interventions||0} interventions · ${n.bootstrap||0} bootstrap draws`;
+  const C=V.comparison||{},M=C.metrics||{};
+  $("v2-verdict").innerHTML=C.best_jepa?`<p><b>Best JEPA</b> (${esc(C.selected_on||"")}): <b>${esc(C.best_jepa)}</b> vs <b>strongest comparison system</b>: <b>${esc(C.strongest_comparison)}</b></p><div class="row" style="gap:8px;flex-wrap:wrap">`+
+    Object.entries(M).map(([k,v])=>{const col=v.verdict==="JEPA better"?"var(--good)":v.verdict==="JEPA worse"?"var(--bad)":"var(--warn)";
+      return `<span class="pill" style="background:${col}" title="difference ${(100*v.diff).toFixed(1)} points, 95 % CI ${(100*v.ci[0]).toFixed(1)} to ${(100*v.ci[1]).toFixed(1)}">${esc(k)}: ${(100*v.diff>=0?"+":"")+(100*v.diff).toFixed(1)} [${(100*v.ci[0]).toFixed(1)}, ${(100*v.ci[1]).toFixed(1)}] ${esc(v.verdict)}</span>`;}).join("")+`</div>`:"";
+  $("v2-table").innerHTML=`<tr><th>#</th><th>system</th><th>main method</th><th>KU as</th><th class="num">seeds</th><th class="num">average %</th><th class="num">forward</th><th class="num">design</th><th class="num">abduction</th><th class="num">consistency</th><th class="num">consist. AUC</th><th class="num">robustness</th><th class="num">all edits beaten</th><th class="num">intervention gain</th></tr>`+
+    S.map(([t,r],i)=>{const c=r.config?runClass(r.config):null,p=r.point,iv=r.intervention;
+      return `<tr><td>${i+1}</td><td>${esc(t)}${t===C.best_jepa?' <span class="pill" style="background:var(--good)">best JEPA (val)</span>':""}${t===C.strongest_comparison?' <span class="pill" style="background:var(--accent)">strongest comparison</span>':""}</td><td>${c?clsPill(c.method):""}</td><td>${c?clsPill(c.ku):""}</td>`+
+      `<td class="num"${r.n_seeds<2?' title="single seed: no seed variance"':""}>${r.n_seeds}${r.n_seeds<2?"*":""}</td><td class="num"><b>${P(p.average)}</b>${ci(r,"average")}</td>`+
+      ["forward","inverse","abduction","consistency"].map(k=>`<td class="num">${P(p[k])}${ci(r,k)}</td>`).join("")+
+      `<td class="num">${r.consistency_auc==null?"–":(+r.consistency_auc).toFixed(3)}</td><td class="num">${P(p.robustness)}${ci(r,"robustness")}</td><td class="num">${P(r.robust_all)}</td>`+
+      `<td class="num" title="${iv?`reciprocal rank of the donor's result ${(+iv.rr_before).toFixed(3)} → ${(+iv.rr_after).toFixed(3)}; moved toward the donor ${P(iv.toward)} %; n=${iv.n}`:""}">${iv?((iv.gain>=0?"+":"")+(+iv.gain).toFixed(3))+`<div class="muted" style="font-size:11px">${(+iv.gain_ci[0]).toFixed(3)}–${(+iv.gain_ci[1]).toFixed(3)}</div>`:"–"}</td></tr>`;}).join("");
+}
 async function benchTab(force){
+  v2Card();
   const now=Date.now();if(!force&&now-lastRunsFetch<4000&&benchInit)return;lastRunsFetch=now;
-  try{RUNS=await j("runs.json");}catch(e){return;}
+  try{RUNS=await allRuns();}catch(e){return;}
   const got=await Promise.all(RUNS.map(r=>j(r.path).catch(()=>null)));got.forEach((d,i)=>{if(d)ALL[RUNS[i].path]=d;});
   const D=RUNS.map(r=>ALL[r.path]).filter(d=>d&&d.experiment&&d.experiment!=="single");
   const exps=[...new Set(D.map(d=>d.experiment))];
   if(!exps.length){$("bench-head").innerHTML='<div class="empty">No experiment runs yet. Set EXPERIMENTS = ["BENCH"] in the notebook.</div>';return;}
   const sel=$("bench-exp"),opts=exps.slice().reverse().map(e=>`<option>${esc(e)}</option>`).join("");
-  if(sel.dataset.o!==opts){const v=sel.value;sel.innerHTML=opts;sel.dataset.o=opts;sel.value=v&&exps.includes(v)?v:(exps.includes("BENCH")?"BENCH":exps[exps.length-1]);}
-  if(!benchInit){benchInit=true;sel.onchange=()=>{resetCharts();benchTab(true);};$("bench-fam").onchange=()=>{resetCharts();benchTab(true);};}
+  if(sel.dataset.o!==opts){const v=sel.value;sel.innerHTML=opts;sel.dataset.o=opts;const ue=!benchInit&&URLQ.get("exp");sel.value=v&&exps.includes(v)?v:ue&&exps.includes(ue)?ue:(exps.includes("BENCH")?"BENCH":exps[exps.length-1]);}
+  if(!benchInit){benchInit=true;const uf=URLQ.get("fam");if(uf&&[...$("bench-fam").options].some(o=>o.value===uf))$("bench-fam").value=uf;
+    sel.onchange=()=>{resetCharts();benchTab(true);syncURL();};$("bench-fam").onchange=()=>{resetCharts();benchTab(true);syncURL();};if(tab==="bench")syncURL();}
   const E=sel.value,FAM=$("bench-fam").value,runs=D.filter(d=>d.experiment===E),arms=[...new Set(runs.map(d=>d.arm))];
   const allRows=arms.map(a=>{const rs=runs.filter(d=>d.arm===a),fin=rs.filter(d=>String(d.status).startsWith("done"));
     const vals={};[...BCOLS,...RCOLS].forEach(([k,,f])=>vals[k]=mstd(fin.map(f)));
@@ -853,8 +1148,9 @@ const _ch=n=>{let s=0;for(let k=1;k<=Math.round(n);k++)s+=1/k;return s/Math.roun
 // ---------------------------------------------------------------- compare two runs
 const MODE_NAME={section:"KUs (sections)",paper:"one KU per paper",paper_masked:"paper as one text","graph-jepa":"Graph-JEPA"};
 let cmpInit=false;
+const runByName=n=>{const r=RUNS.find(x=>x.name===n);return r?ALL[r.path]:null;};
 function cmpPick(){   // default pair: newest experiment whose arms differ in ku_mode, else the two newest runs
-  const names=RUNS.map(r=>r.name),D=names.map(n=>ALL[`runs/${n}/live.json`]).filter(Boolean);
+  const names=RUNS.map(r=>r.name),D=names.map(runByName).filter(Boolean);
   for(let i=D.length-1;i>=0;i--){const d=D[i];if(!d.experiment||d.experiment==="single")continue;
     const mates=D.filter(o=>o.experiment===d.experiment&&o.seed===d.seed&&o.config.ku_mode!==d.config.ku_mode);
     if(mates.length){const a=d.config.ku_mode==="section"?d:mates.find(o=>o.config.ku_mode==="section")||mates[0],b=a===d?mates[0]:d;return [a.name,b.name];}}
@@ -890,14 +1186,16 @@ function cmpWinner(a,b,kind){
 }
 async function compareTab(force){
   const now=Date.now();if(!force&&now-lastRunsFetch<4000&&cmpInit)return;lastRunsFetch=now;
-  try{RUNS=await j("runs.json");}catch(e){return;}
+  try{RUNS=await allRuns();}catch(e){return;}
   const got=await Promise.all(RUNS.map(r=>j(r.path).catch(()=>null)));got.forEach((d,i)=>{if(d)ALL[RUNS[i].path]=d;});
   const opts=RUNS.slice().reverse().map(r=>`<option value="${esc(r.name)}">${esc(r.name)}</option>`).join("");
   for(const id of ["cmpA","cmpB"])if($(id).dataset.o!==opts){const v=$(id).value;$(id).innerHTML=opts;$(id).dataset.o=opts;if(v)$(id).value=v;}
-  if(!cmpInit&&RUNS.length){const [a,b]=cmpPick();$("cmpA").value=a;$("cmpB").value=b;cmpInit=true;
-    $("cmpA").onchange=$("cmpB").onchange=$("cmpSrc").onchange=()=>{resetCharts();compareTab(true);};
-    $("cmpSwap").onclick=()=>{const a=$("cmpA").value;$("cmpA").value=$("cmpB").value;$("cmpB").value=a;resetCharts();compareTab(true);};}
-  const A=ALL[`runs/${$("cmpA").value}/live.json`],B=ALL[`runs/${$("cmpB").value}/live.json`];
+  if(!cmpInit&&RUNS.length){const [a,b]=cmpPick(),has=n=>n&&RUNS.some(r=>r.name===n);
+    $("cmpA").value=has(URLQ.get("a"))?URLQ.get("a"):a;$("cmpB").value=has(URLQ.get("b"))?URLQ.get("b"):b;cmpInit=true;
+    $("cmpA").onchange=$("cmpB").onchange=$("cmpSrc").onchange=()=>{resetCharts();compareTab(true);syncURL();};
+    $("cmpSwap").onclick=()=>{const a=$("cmpA").value;$("cmpA").value=$("cmpB").value;$("cmpB").value=a;resetCharts();compareTab(true);syncURL();};
+    if(tab==="compare")syncURL();}
+  const A=runByName($("cmpA").value),B=runByName($("cmpB").value);
   if(!A||!B){$("cmp-head").innerHTML='<div class="empty">Need at least one run.</div>';return;}
   const useTest=$("cmpSrc").value==="best"&&(A.final||{}).retrieval_balanced&&(B.final||{}).retrieval_balanced;
   const VA=cmpVals(A,useTest),VB=cmpVals(B,useTest),keys=[...new Set([...Object.keys(VA),...Object.keys(VB)])];
@@ -942,18 +1240,19 @@ async function compareTab(force){
 }
 
 // ---------------------------------------------------------------- polling
-function selectRun(path){if(path===RUN)return;RUN=path;$("run").value=path;$("ex-type").innerHTML="";resetCharts();DATA=null;poll(true);}
+function selectRun(path){if(path===RUN)return;RUN=path;$("run").value=path;$("ex-type").innerHTML="";resetCharts();DATA=null;syncURL();poll(true);}
 $("run").onchange=()=>{$("follow").checked=false;selectRun($("run").value);};
+$("follow").addEventListener("change",()=>syncURL());
 async function refreshRuns(){
-  try{RUNS=await j("runs.json");}catch(e){return;}
+  try{RUNS=await allRuns();}catch(e){return;}
   const sel=$("run"),opts=RUNS.slice().reverse();
   const html=opts.map(r=>`<option value="${r.path}">${esc(r.name)}</option>`).join("");if(sel.innerHTML!==html)sel.innerHTML=html;
-  const want=(new URLSearchParams(location.search).get("run")||"").replace(/ /g,"+")||null;   // "+" in run names
+  const want=(URLQ.get("run")||"").replace(/ /g,"+")||null;   // "+" in run names
   let target=RUN;
-  if(!RUN&&want)target=`runs/${want}/live.json`;
+  if(!RUN&&want)target=(RUNS.find(r=>r.name===want)||{}).path||`runs/${want}/live.json`;
   if($("follow").checked&&opts.length)target=opts[0].path;              // newest run = the one training now
   if(!target&&opts.length)target=opts[0].path;
-  if(target&&target!==RUN){RUN=target;resetCharts();$("ex-type").innerHTML="";}
+  if(target&&target!==RUN){RUN=target;resetCharts();$("ex-type").innerHTML="";syncURL();}
   sel.value=RUN;
 }
 async function poll(force){
@@ -963,7 +1262,132 @@ async function poll(force){
   if(tab==="runs")runsTab(false);
   if(tab==="compare")compareTab(false);
   if(tab==="bench")benchTab(false);
+  if(tab==="cost")costTab(false);
 }
 if(new URLSearchParams(location.search).get("run"))$("follow").checked=false;
+const SAFE_COL={pass:"var(--good)",warn:"var(--warn)",fail:"var(--bad)"};
+const safeFmt=(v,kind)=>v==null||isNaN(v)?"–":kind==="%"?(100*v).toFixed(0)+" %":(+v).toFixed(2);
+const safeCell=(v,fl,kind)=>{const c=SAFE_COL[fl];return `<td class="num"${c?` style="box-shadow:inset 4px 0 0 ${c}"`:""} title="${fl||""}">${safeFmt(v,kind)}${c?` <span class="pill" style="background:${c}">${fl}</span>`:""}</td>`;};
+const CARD_ST={measured:"var(--good)",model:"var(--accent)",planned:"var(--warn)","n/a":"var(--chance)",data:"var(--accent)"};
+const wilson=(p,n)=>{if(p==null||!n)return "";const z=1.96,c=(p+z*z/(2*n))/(1+z*z/n),h=z*Math.sqrt((p*(1-p)+z*z/(4*n))/n)/(1+z*z/n);return ` <span class="muted" style="font-size:11px">[${(100*Math.max(0,c-h)).toFixed(0)}–${(100*Math.min(1,c+h)).toFixed(0)} %]</span>`;};
+function sciData(D){
+  if(!D){$("sci-data").innerHTML='<div class="empty">Not run yet: <code>sci-jepa science-safety &lt;results folder&gt;</code> on a GPU node, then <code>sci-jepa safety &lt;results folder&gt;</code>.</div>';return;}
+  const F=D.faithfulness||{},H=D.dual_use||{},R=D.retractions||{},P=v=>v==null?"–":(100*v).toFixed(1)+" %";
+  let h=`<div class="row" style="gap:16px;flex-wrap:wrap;align-items:flex-start">`;
+  h+=`<div style="flex:1;min-width:260px"><b>R1 · KU faithfulness</b> <span class="muted">(${esc(F.judge||"not run")})</span>`+(F.n_kus?
+    `<div class="kpis" style="margin:6px 0">${kpi("sentences supported",P(F.sentence_supported),`${F.n_sentences} sentences`+"",F.sentence_supported>=0.9?"ok":F.sentence_supported>=0.8?"wa":"no")}${kpi("KUs fully supported",P(F.ku_supported),`${F.n_kus} KUs`,F.ku_supported>=0.9?"ok":F.ku_supported>=0.8?"wa":"no")}</div>`+
+    `<div class="hint">95 % interval, sentences:${wilson(F.sentence_supported,F.n_sentences)} · KUs:${wilson(F.ku_supported,F.n_kus)}</div>`+
+    `<table><tr><th>KU type</th><th class="num">n</th><th class="num">fully supported</th></tr>${Object.entries(F.by_type||{}).sort((a,b)=>a[1].ku_supported-b[1].ku_supported).map(([t,v])=>`<tr><td>${esc(t)}</td><td class="num">${v.n}</td><td class="num" style="background:${lvlBg(v.ku_supported>=0.9?"good":v.ku_supported>=0.8?"warn":"bad")}">${P(v.ku_supported)}</td></tr>`).join("")}</table>`+
+    `<details><summary>unsupported sentences (${(F.unsupported||[]).length}, for a human check)</summary><ul>${(F.unsupported||[]).map(u=>`<li><span class="muted">${esc(u.paper)} · ${esc(u.type)} · P(yes) ${(+u.p_yes).toFixed(2)}</span> ${esc(u.sentence)}</li>`).join("")}</ul></details>`
+    :`<div class="muted">needs the GPU run (7B judge)</div>`)+`</div>`;
+  const cats=H.categories||[];
+  h+=`<div style="flex:1;min-width:260px"><b>R8 · dual-use share of the data</b> <span class="muted">(WMDP questions + hazard terms)</span>`+(cats.length?
+    `<table><tr><th>split</th>${cats.map(c=>`<th class="num">${esc(c)}</th>`).join("")}</tr>${["train","val","test"].map(sp=>{const s=(H.splits||{})[sp]||{};return `<tr><td>${sp}</td>${cats.map(c=>{const v=s[c]||{};return `<td class="num" title="${v.kus||0} KUs in ${v.papers||0} papers">${P(v.share)} <span class="muted" style="font-size:11px">${v.papers||0} papers</span></td>`;}).join("")}</tr>`;}).join("")}</table>`+
+    `<div class="hint">A KU is flagged when its cosine to the nearest WMDP question is in the top ${(100*(1-(H.quantile||0.99))).toFixed(0)} % (thresholds ${cats.map(c=>`${c} ${(+H.thresholds[c]).toFixed(2)}`).join(", ")}) and it contains a hazard term of that category.</div>`+
+    `<details><summary>closest examples (${(H.examples||[]).length})</summary><ul>${(H.examples||[]).map(e=>`<li><span class="muted">${esc(e.category)} · ${esc(e.title||e.paper)} · cos ${(+e.cos).toFixed(2)}</span> ${esc(e.text)}</li>`).join("")}</ul></details>`
+    :`<div class="muted">not run</div>`)+`</div>`;
+  h+=`<div style="flex:1;min-width:220px"><b>R1 · retracted / withdrawn papers</b>`+(R.train?
+    `<table><tr><th>split</th><th class="num">papers</th><th class="num">OpenAlex matched</th><th class="num">retracted</th><th class="num">withdrawn</th></tr>${["train","val","test"].map(sp=>{const s=R[sp]||{};const n=v=>(v||[]).length;
+      return `<tr><td>${sp}</td><td class="num">${s.papers||0}</td><td class="num">${s.openalex_matched||0}</td><td class="num" style="background:${n(s.retracted)?lvlBg("bad"):""}" title="${esc((s.retracted||[]).join(", "))}">${n(s.retracted)}</td><td class="num" style="background:${n(s.withdrawn)?lvlBg("warn"):""}" title="${esc((s.withdrawn||[]).join(", "))}">${n(s.withdrawn)}</td></tr>`;}).join("")}</table><div class="hint">${esc(R.note||"")}</div>`
+    :`<div class="muted">not run</div>`)+`</div>`;
+  $("sci-data").innerHTML=h+`</div>`;
+}
+const FL_RANK={fail:3,warn:2,pass:1};
+const ciTxt=(c,kind)=>!c?"–":safeFmt(c.v,kind)+(c.lo!=null?` <span class="muted" style="font-size:11px">[${safeFmt(c.lo,kind)}–${safeFmt(c.hi,kind)}]</span>`:"")+(c.kind?` <span class="muted" style="font-size:11px">${esc(c.kind)}</span>`:"");
+function renderCard(S,sys){
+  const C=S.card||[];
+  if(!C.length||!C[0].title){$("card-src").textContent="Re-run sci-jepa safety to get the risk card.";$("card-matrix").innerHTML="";$("card-sections").innerHTML="";return;}
+  $("card-src").innerHTML=`Reference: ${esc(S.card_source||"")}.`+(S.caveat?` <b>Caveat:</b> ${esc(S.caveat)}`:"")+(S.not_applicable?` <span class="muted">${esc(S.not_applicable)}</span>`:"");
+  const L=S.limits||{},HB=S.higher_is_better||[];
+  const p=(k,v)=>k==="ece"?v:(100*v).toFixed(0)+" %";
+  const lim=k=>L[k]?(HB.includes(k)?`pass ≥ ${p(k,L[k][0])} · fail < ${p(k,L[k][1])}`:`pass ≤ ${p(k,L[k][0])} · fail > ${p(k,L[k][1])}`):"reported, not flagged";
+  const worst=(r,sec)=>{let w=null;(sec.metrics||[]).forEach(([k])=>{const f=(r.flags||{})[k];if(FL_RANK[f]&&(!w||FL_RANK[f]>FL_RANK[w]))w=f;});return w;};
+  const has=(r,sec)=>(sec.metrics||[]).some(([k])=>(r.card||{})[k]);
+  $("card-matrix").innerHTML=`<tr><th>system</th><th>main method</th>${C.map(s=>`<th title="${esc(s.question)}">${esc(s.ref)}<div class="muted" style="font-weight:400;font-size:11px">${esc(s.title)}</div></th>`).join("")}<th>seeds</th></tr>`+
+    sys.map(([t,r])=>`<tr><td>${armName(t)}</td><td>${r.config?clsPill(runClass(r.config).method):(r.family&&FAMILY[r.family]?famPill(r.family):"")}</td>${C.map(sec=>{
+      if(!has(r,sec)){const cmp=r.family==="comparison"&&(sec.status==="model"||sec.ref==="R7");
+        return `<td class="muted" style="text-align:center" title="${cmp?"needs trained JEPA weights / a graph: not applicable to a comparison system":""}">${cmp?"n/a":sec.status==="data"?"see data ↑":sec.status==="model"?"model":r.science_n?"–":"not run"}</td>`;}
+      const w=worst(r,sec),tip=sec.metrics.filter(([k])=>(r.card||{})[k]).map(([k,l,kind])=>`${l}: ${safeFmt(r.card[k].v,kind)}`).join(" · ");
+      return `<td style="text-align:center;background:${w?{pass:"rgba(22,163,74,.30)",warn:"rgba(217,119,6,.25)",fail:"rgba(220,38,38,.22)"}[w]:""}" title="${esc(tip)}">${w||"·"}</td>`;}).join("")}<td class="num">${r.n||""}</td></tr>`).join("");
+  $("card-sections").innerHTML=C.map(sec=>{
+    const head=`<span class="pill" style="background:${CARD_ST[sec.status]||"var(--chance)"}">${esc(sec.status)}</span> <b>${esc(sec.ref)} · ${esc(sec.title)}</b> <span class="muted">${esc(sec.question)}</span>`;
+    const rows=sys.filter(([,r])=>has(r,sec));
+    const tbl=rows.length?`<div class="scroll"><table><tr><th>system</th>${sec.metrics.map(([k,l])=>`<th>${esc(l)}<div class="muted" style="font-weight:400;font-size:11px">${lim(k)}</div></th>`).join("")}</tr>`+
+      rows.map(([t,r])=>`<tr><td>${armName(t)}</td>${sec.metrics.map(([k,,kind])=>{const c=(r.card||{})[k],f=(r.flags||{})[k],col=SAFE_COL[f];
+        return `<td class="num"${col?` style="box-shadow:inset 4px 0 0 ${col}"`:""} title="${f||""}${c?" · n="+c.n+" · "+c.ci:""}">${ciTxt(c,kind)}</td>`;}).join("")}</tr>`).join("")+`</table></div>`
+      :`<p class="muted">${sec.status==="model"?"Needs the GPU model check: sci-jepa safety &lt;results folder&gt; --models":"No values yet (sci-jepa science-safety on a GPU node)."}</p>`;
+    return `<details style="margin-top:8px" open><summary>${head}</summary><p class="hint">${esc(sec.ours)}</p><p class="hint"><b>Standard:</b> ${esc(sec.framework||"")}</p>${tbl}</details>`;}).join("");
+}
+const REG_COL={met:"var(--good)",ready:"#0891b2",partly:"var(--warn)",gap:"var(--bad)",manual:"var(--accent)","n/a":"var(--chance)",info:"var(--chance)"};
+let regInit=false;
+function regPath(S,E){   // what is left to reach full compliance, grouped by who has to act
+  const P=S.path;if(!P)return "";
+  const G=E.gov||{},ab=E.abstain,doc=n=>`<a href="governance/${n}" target="_blank">${esc(n)}</a>`;
+  const li=a=>`<li><b>${esc(a.ref)}</b> <span class="muted">${esc(a.framework)}</span>: ${esc(a.action)}</li>`;
+  const grp=(t,col,arr,hint)=>arr&&arr.length?`<div style="flex:1;min-width:260px"><div><span class="pill" style="background:${col}">${arr.length}</span> <b>${t}</b></div><div class="hint">${hint}</div><ul style="margin:4px 0 0 0;padding-left:18px">${arr.map(li).join("")}</ul></div>`:"";
+  const done=Object.values(P).every(a=>!a.length);
+  return `<div class="card" style="margin:10px 0;padding:10px;border:1px solid var(--line)"><b>Path to full compliance</b> `+
+    (done?`<span class="pill" style="background:var(--good)">nothing left</span>`:`<span class="muted">what is left, by who has to act</span>`)+
+    `<div class="row" style="gap:16px;flex-wrap:wrap;align-items:flex-start;margin-top:6px">`+
+    grp("signatures","#0891b2",P.sign,"Drafts are prepared: a person reads, amends if needed and fills the 'Signed off by' line; the next run marks the item met.")+
+    grp("needs v2 training","var(--bad)",P.v2,"Technical limits of the current model, declared in the model card; fixed only by the next training run.")+
+    grp("people / organisation","var(--accent)",P.people,"Steps no file can show.")+
+    grp("other","var(--warn)",P.other,"")+`</div>`+
+    `<div class="hint" style="margin-top:6px"><b>Documents</b>: ${["MODEL_CARD.md","DATASHEET.md","DPO_PACKAGE.md","AI_LITERACY.md","REMOVAL_PROCEDURE.md","LICENCE_DECISION.md","CONTACT","NOTICE","exclude_papers.txt"].map(doc).join(" · ")}`+
+    (ab?` · <b>abstention</b>: consistency(…, abstain_below=${(+ab.threshold).toFixed(2)}) → ${(100*ab.accuracy).toFixed(0)} % right on the ${(100*ab.coverage).toFixed(0)} % answered`:"")+
+    ` · <b>release check</b>: <code>sci-jepa release export / check</code> ${E.release_tool?'<span class="pill" style="background:var(--good)">ready</span>':""}</div></div>`;
+}
+async function regCard(){
+  let C;try{C=await j("compliance.json");}catch(e){$("reg-summary").innerHTML='<div class="empty">Not run yet: <code>sci-jepa compliance &lt;results folder&gt;</code> (CPU, about a minute).</div>';$("reg-table").innerHTML="";return;}
+  const F=C.frameworks||{},R=C.requirements||[],S=C.summary||{},E=C.evidence||{},sel=$("reg-fw");
+  if(!regInit){regInit=true;sel.innerHTML='<option value="">all frameworks</option>'+Object.entries(F).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join("");sel.onchange=regCard;}
+  const tot={};R.forEach(r=>tot[r.status]=(tot[r.status]||0)+1);
+  $("reg-meta").textContent=` · ${R.length} requirements · ${Object.keys(F).length} frameworks`;
+  const pii=E.pii||{},en=E.energy||{};
+  $("reg-summary").innerHTML=`<div class="note" style="margin:6px 0"><b>Classification.</b> ${esc(S.classification||"")}</div>`+
+    `<div class="row" style="gap:8px;flex-wrap:wrap;margin:6px 0">${["met","ready","partly","gap","manual","n/a","info"].filter(s=>tot[s]).map(s=>`<span class="pill" style="background:${REG_COL[s]}">${tot[s]} ${s}</span>`).join("")}</div>`+
+    `<div class="kpis">${kpi("personal-data columns read",String((E.personal_cols_read||[]).length),`of ${(E.read_cols||[]).length} columns`,(E.personal_cols_read||[]).length?"no":"ok")}`+
+    `${kpi("e-mails in KU texts",String(pii.email??"–"),pii.kus?`of ${(+pii.kus).toLocaleString()} KUs · ORCID ${pii.orcid}`:"",pii.email?"wa":"ok")}`+
+    `${kpi("training compute",E.train_flop_max?(+E.train_flop_max).toExponential(1)+" FLOP":"–","GPAI indicative threshold 1e23","ok")}`+
+    `${kpi("energy so far",en.kwh?`${(+en.kwh).toFixed(0)} kWh`:"–",en.kwh?`≈ ${(+en.kg_co2e).toFixed(0)} kg CO2e · ${(+en.a100_equiv_hours).toFixed(0)} A100-h`:"")}`+
+    `${kpi("dataset licence",esc(E.dataset_license||"–"),"attribution required")}</div>`+
+    regPath(S,E)+
+    (S.altai_scores?`<p class="hint" style="margin-top:8px"><b>ALTAI-style score per HLEG requirement</b> (4 met · 3 ready · 2 partly · 1 gap · 0 manual): ${Object.entries(S.altai_scores).map(([k,v])=>`${esc(k)}: ${v}/4`).join(" · ")}</p>`:"");
+  const fw=sel.value,rows=R.filter(r=>!fw||r.framework===fw);
+  let last="";
+  $("reg-table").innerHTML=`<tr><th>reference</th><th>requirement</th><th>applies</th><th>status</th><th>evidence</th><th>action</th></tr>`+rows.map(r=>{
+    const g=r.framework!==last?`<tr><td colspan="6" style="background:var(--accent-soft,rgba(37,99,235,.08));font-weight:600">${esc(F[r.framework]||r.framework)}</td></tr>`:"";last=r.framework;
+    return g+`<tr><td style="white-space:nowrap">${esc(r.ref)}</td><td>${esc(r.requirement)}</td><td class="muted">${esc(r.applies)}</td><td><span class="pill" style="background:${REG_COL[r.status]||"var(--chance)"}">${esc(r.status)}</span></td><td style="font-size:12.5px">${esc(r.evidence)}</td><td style="font-size:12.5px">${esc(r.action||"")}</td></tr>`;}).join("");
+}
+async function safetyTab(){
+  let S;try{S=await j("safety.json");}catch(e){$("safe-summary").innerHTML='<div class="empty">No safety report yet. Run <code>sci-jepa safety &lt;results folder&gt;</code> (and <code>--models</code> on a GPU node); it writes safety.json into this dashboard.</div>';["safe-table","safe-models"].forEach(id=>$(id).innerHTML="");return;}
+  const L=S.limits||{},sys=Object.entries(S.systems||{}).sort((a,b)=>(b[1].robustness||0)-(a[1].robustness||0));
+  const lim=k=>L[k]?`<div class="muted" style="font-weight:400;font-size:11px">${["robustness","structure","paraphrase_stable","meaning_sensitive"].includes(k)?"pass ≥ "+L[k][0]+" · fail &lt; "+L[k][1]:"pass ≤ "+L[k][0]+" · fail &gt; "+L[k][1]}</div>`:"";
+  $("safe-meta").textContent=` · ${S.experiment} · ${sys.length} systems · ${Object.keys(S.models||{}).length} trained models checked`;
+  const bySys=sys.slice().sort((a,b)=>armName(a[0]).localeCompare(armName(b[0])));
+  renderCard(S,bySys);
+  sciData(S.science&&S.science.data);
+  const cnt={pass:0,warn:0,fail:0};sys.forEach(([,r])=>Object.values(r.flags||{}).forEach(f=>{if(cnt[f]!=null)cnt[f]++;}));
+  const worst=sys.filter(([,r])=>(r.flags||{}).robustness==="fail").map(([t])=>armName(t));
+  const bias=sys.filter(([,r])=>(r.flags||{}).label_gap==="fail").map(([t])=>armName(t));
+  $("safe-summary").innerHTML=`<div class="row" style="gap:18px;flex-wrap:wrap"><span><span class="pill" style="background:var(--good)">${cnt.pass} pass</span> <span class="pill" style="background:var(--warn)">${cnt.warn} warn</span> <span class="pill" style="background:var(--bad)">${cnt.fail} fail</span></span>`+
+    (worst.length?`<span>Near chance on meaning-reversing edits: <b>${worst.join(", ")}</b></span>`:"")+(bias.length?`<span>Mostly one answer on supports / contradicts: <b>${bias.join(", ")}</b></span>`:"")+`</div>`;
+  const cols=[["robustness","robustness","%"],["domain_gap","worst-domain gap","%"],["label_gap","label gap","%"],["identity","identity probe","%"],["structure","structure reliance","%"],["false_accept","false accept","%"],["contamination","later papers","%"]];
+  const kinds=[...new Set(sys.flatMap(([,r])=>Object.keys(r.robustness_by_kind||{})))].sort();
+  $("safe-table").innerHTML=`<tr><th>system</th><th>family</th>${cols.map(([k,l])=>`<th>${l}${lim(k)}</th>`).join("")}${kinds.map(k=>`<th>robust: ${esc(k)}</th>`).join("")}<th>seeds</th></tr>`+
+    sys.map(([t,r])=>`<tr><td>${armName(t)}</td><td>${r.family&&FAMILY[r.family]?famPill(r.family):""}</td>${cols.map(([k,,kind])=>safeCell(r[k],(r.flags||{})[k],kind)).join("")}${kinds.map(k=>`<td class="num">${safeFmt((r.robustness_by_kind||{})[k],"%")}</td>`).join("")}<td class="num">${r.n||""}</td></tr>`).join("");
+  const M=Object.entries(S.models||{});
+  if(!M.length){$("safe-models").innerHTML=`<tr><td class="muted">Not run yet: <code>sci-jepa safety &lt;results folder&gt; --models</code> on a GPU node.</td></tr>`;$("safe-rel").innerHTML="";}
+  else{$("safe-models").innerHTML=`<tr><th>model</th><th>ECE${lim("ece")}</th><th>accuracy</th><th>mean confidence</th><th>Hits@1 all</th><th>Hits@1, 40 % most confident</th><th>paraphrase stable${lim("paraphrase_stable")}</th><th>prefers paraphrase over edit${lim("meaning_sensitive")}</th></tr>`+
+    M.map(([t,r])=>{const c=r.calibration||{},cv=(r.selective||{}).hits1_by_coverage||{},p=r.paraphrase||{},f=r.flags||{};
+      return `<tr><td>${esc(t)}</td>${safeCell(c.ece,f.ece,"x")}<td class="num">${safeFmt(c.accuracy,"%")}</td><td class="num">${safeFmt(c.mean_confidence,"%")}</td><td class="num">${safeFmt(cv["100%"],"%")}</td><td class="num">${safeFmt(cv["40%"],"%")}</td>${safeCell(p.stable,f.paraphrase_stable,"%")}${safeCell(p.meaning_sensitive,f.meaning_sensitive,"%")}</tr>`;}).join("");
+    const [t0,r0]=M[0],rel=((r0.calibration||{}).reliability)||[];
+    if(rel.length){const W=320,H=180,x=v=>30+v*(W-40),y=v=>H-20-v*(H-30);
+      $("safe-rel").innerHTML=`<p class="hint">Reliability of <b>${esc(t0)}</b>: dots on the diagonal = well calibrated.</p><svg viewBox="0 0 ${W} ${H}" style="max-width:360px;width:100%"><line x1="${x(0)}" y1="${y(0)}" x2="${x(1)}" y2="${y(1)}" stroke="var(--chance)" stroke-dasharray="4 4"/><line x1="${x(0)}" y1="${y(0)}" x2="${x(1)}" y2="${y(0)}" stroke="var(--line)"/><line x1="${x(0)}" y1="${y(0)}" x2="${x(0)}" y2="${y(1)}" stroke="var(--line)"/>`+
+        rel.map(b=>`<circle cx="${x(b.conf)}" cy="${y(b.acc)}" r="${3+Math.min(6,Math.sqrt(b.n)/3)}" fill="var(--accent)"><title>confidence ${(100*b.conf).toFixed(0)} %: correct ${(100*b.acc).toFixed(0)} % (${b.n})</title></circle>`).join("")+
+        `<text x="${x(0.5)}" y="${H-4}" text-anchor="middle" font-size="10" fill="var(--muted)">confidence</text><text x="8" y="${y(0.5)}" font-size="10" fill="var(--muted)" transform="rotate(-90 8 ${y(0.5)})" text-anchor="middle">correct</text></svg>`;}
+    else $("safe-rel").innerHTML="";}
+  $("safe-notes").innerHTML=`<ul>${Object.values(S.not_yet||{}).map(v=>`<li>${esc(v)}</li>`).join("")}</ul><p><b>Intended use and known weaknesses</b></p><ul>${(S.usage||[]).map(v=>`<li>${esc(v)}</li>`).join("")}</ul>`;
+}
 showTab();poll(true);setInterval(()=>poll(false),2000);
 </script></body></html>
