@@ -167,7 +167,10 @@ class GINEMessage(nn.Module):
     def forward(self, h, rel, pad):
         A = _edges(rel, pad).to(h.dtype)
         deg = A.sum(-1, keepdim=True).clamp_min(1.0)
-        cnt = torch.stack([(A * (rel == r)).sum(-1) for r in range(N_RELS)], -1)   # (B, T, R) edges per relation
+        # (B, T, R) edges per relation: one scatter instead of a kernel per relation; integer counts summed in fp32
+        # (exact), then cast like the per-relation sums were, so the values are identical
+        cnt = torch.zeros(*A.shape[:2], N_RELS, dtype=torch.float32, device=A.device)
+        cnt = cnt.scatter_add_(2, rel.long(), A.float()).to(A.dtype)
         agg = (A @ h + cnt @ self.edge.weight.to(h.dtype)) / deg
         return self.mlp((1 + self.eps) * h + agg)
 

@@ -89,14 +89,18 @@ tunnel() {    # $1 = job id
     [[ -f "${SJ}" ]] || sleep 5
   done
   PORT=$(grep -o '"port": [0-9]*' "${SJ}" | grep -o '[0-9]*$')
-  # login nodes are shared: skip ports someone else listens on
-  while ss -ltn 2>/dev/null | grep -q "127.0.0.1:${LPORT} "; do LPORT=$((LPORT + 1)); done
+  # login nodes are shared: skip ports someone else listens on (ss by full path: tmux sessions may lack /usr/sbin)
+  local SS; SS="$(command -v ss || echo /usr/sbin/ss)"
+  free_port() { while "${SS}" -ltn 2>/dev/null | grep -q "127.0.0.1:${LPORT} "; do LPORT=$((LPORT + 1)); done; }
+  free_port
   echo "================================================================"
   echo " dashboard: ${NODE}:${PORT}  ->  http://localhost:${LPORT}/"
   echo " VS Code opens it in your browser (Ports tab: 'Paper A dashboard')."
   echo " Ctrl-C closes the tunnel only; the job keeps running. Reconnect: bash cluster/grete/run_paper_a.sh tunnel ${JOB}"
   echo "================================================================"
   while [[ -n "$(squeue -h -j "${JOB}" 2>/dev/null)" ]]; do   # re-opened if the connection drops; ends with the job
+    local OLD="${LPORT}"; free_port
+    [[ "${LPORT}" != "${OLD}" ]] && echo " port ${OLD} is taken now: dashboard -> http://localhost:${LPORT}/"
     ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-new \
         -L "127.0.0.1:${LPORT}:localhost:${PORT}" "${NODE}"
     sleep 5
@@ -178,13 +182,24 @@ if [[ "${CMD}" == "submit" || "${CMD}" == "serve" ]]; then
   [[ "${JOBCMD}" == dist || -n "${MEM:-}" ]] && OPTS+=(--mem="${MEM:-200G}")
   JOB=$(sbatch --parsable "${OPTS[@]}" "${REPO}/cluster/grete/run_paper_a.sh" "${JOBCMD}") || exit 1
   echo "submitted job ${JOB} (${JOBCMD}); log: ${LOGS}/paper_a_${JOB}.out"
+  # hosted dashboard: compute nodes without internet cannot push, so one pusher runs here until the jobs end
+  if [[ -n "${SCIJEPA_PUSH_URL:-}" && -n "${SCIJEPA_PUSH_TOKEN:-}" && "${COMPUTE_HAS_INTERNET}" != 1 ]]; then
+    DASH="${PAPER_A_OUT}/dashboard"; mkdir -p "${DASH}"
+    if pgrep -u "${USER}" -f "push_dashboard.py ${DASH} " >/dev/null; then
+      echo "hosted dashboard: pusher already running for ${DASH}"
+    else
+      nohup python3 "${REPO}/scripts/push_dashboard.py" "${DASH}" --until-idle --squeue-args "-A ${ACCOUNT}" \
+        >> "${LOGS}/push_dashboard.log" 2>&1 &
+      echo "hosted dashboard: pushing ${DASH} to ${SCIJEPA_PUSH_URL} until your jobs end (log: ${LOGS}/push_dashboard.log)"
+    fi
+  fi
   [[ "${JOBCMD}" == smoke || "${JOBCMD}" == split ]] && { echo "no dashboard; follow the log: tail -f ${LOGS}/paper_a_${JOB}.out"; exit 0; }
   case "${OPEN_BROWSER:-1}" in 0|false|False|no) echo "OPEN_BROWSER=0: no tunnel. Later: bash cluster/grete/run_paper_a.sh tunnel ${JOB}"; exit 0 ;; esac
   tunnel "${JOB}"; exit $?
 fi
 
 # ---------------------------------------------------------------- inside the GPU job
-[[ "${COMPUTE_HAS_INTERNET}" == 1 ]] || export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+[[ "${COMPUTE_HAS_INTERNET}" == 1 ]] || export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 SCIJEPA_AUTOPUSH=0   # login node pushes
 # login nodes often set OMP_NUM_THREADS=1, and --export=ALL carries it into the job: use the job's cores
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-${OMP_NUM_THREADS:-1}}" MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 cd "${REPO}" || exit 1

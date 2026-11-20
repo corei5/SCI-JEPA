@@ -15,12 +15,15 @@ import hashlib
 import os
 import time
 import zlib
+from array import array
 from collections import Counter, defaultdict
 
 import numpy as np
 import torch
 
 from sci_jepa.data import ku_schema as S
+
+SPILL_SUFFIX = ".spill.npy"            # = graph_index.SPILL_SUFFIX: save_index moves these files into place
 
 INDEX_VERSION = 6          # bump when the blob format changes (2: KU text snippets; 6: canonical domains +
                            # domain-balanced corpus; 5: experiment-design
@@ -50,7 +53,7 @@ class HashEmbedder:
 
 
 class STEmbedder:
-    def __init__(self, name, device, max_tokens, batch=32, prefix="", bucket=512, dtype="float32"):
+    def __init__(self, name, device, max_tokens, batch=32, prefix="", bucket=512, dtype="float32", tokens=8192):
         from sentence_transformers import SentenceTransformer
         self.m = SentenceTransformer(name, device=device)
         if max_tokens:
@@ -58,19 +61,19 @@ class STEmbedder:
         if dtype != "float32" and str(device) != "cpu":   # fp16 on GPU: 1.9x faster, cosine to fp32 >= 0.99999
             self.m.to(getattr(torch, dtype))
         self.dim = self.m.get_sentence_embedding_dimension()
-        self.batch, self.prefix, self.bucket = batch, prefix, bucket
+        self.batch, self.prefix, self.bucket, self.tokens = batch, prefix, bucket, tokens
         self.n_seen = self.n_truncated = 0
         print(f"[ku_graph] text encoder {name}: {self.dim}-d, context {self.m.max_seq_length} tokens, {device}, "
               f"{dtype}, padding to multiples of {bucket}")
 
-    def encode(self, texts, token_budget=8192, bucket=None):
+    def encode(self, texts, token_budget=None, bucket=None):
         """Batches by a token budget (many short KUs, few long papers per pass) and pads
         to a multiple of `bucket`: on Apple GPUs every distinct sequence length keeps its
         own cached buffers, and thousands of lengths ran an 88 GB GPU out of memory.
         Texts are sorted by length, so 64 gives only 32 distinct lengths (at 2,048 tokens),
         identical vectors and 4.3x the speed of 512 on short KUs (median 36 tokens)."""
         import torch
-        bucket = bucket or self.bucket
+        bucket, token_budget = bucket or self.bucket, token_budget or self.tokens
         if self.prefix:
             texts = [self.prefix + t for t in texts]
         tok, L = self.m.tokenizer, self.m.max_seq_length
@@ -107,24 +110,47 @@ class ResumableEmbedder:
 
     def __init__(self, emb, root, chunk=8192):
         self.emb, self.root, self.chunk, self.reused = emb, root, chunk, 0
+        self.n_chunks = 0                                  # chunks seen so far (prefill: which ones are this process's)
         os.makedirs(root, exist_ok=True)
 
     def __getattr__(self, k):
         return getattr(self.emb, k)
 
+    def _file(self, part):
+        return os.path.join(self.root, hashlib.sha1("\x1e".join(part).encode()).hexdigest()[:20] + ".npy")
+
+    def _encode_part(self, part, f):
+        X = np.asarray(self.emb.encode(part), dtype=np.float16)
+        tmp = f"{f[:-4]}.{os.getpid()}.tmp.npy"            # per process: prefill workers may encode the same chunk
+        np.save(tmp, X)
+        os.replace(tmp, f)                                 # complete files only
+        return X
+
     def encode(self, texts):
         out = []
         for s in range(0, len(texts), self.chunk):
             part = list(texts[s:s + self.chunk])
-            f = os.path.join(self.root, hashlib.sha1("\x1e".join(part).encode()).hexdigest()[:20] + ".npy")
+            f = self._file(part)
+            self.n_chunks += 1
             if os.path.exists(f):
                 out.append(np.load(f)); self.reused += len(part)
                 continue
-            X = np.asarray(self.emb.encode(part), dtype=np.float16)
-            np.save(f[:-4] + ".tmp.npy", X)
-            os.replace(f[:-4] + ".tmp.npy", f)             # complete files only
-            out.append(X)
+            out.append(self._encode_part(part, f))
         return np.concatenate(out) if out else np.zeros((0, self.emb.dim), np.float16)
+
+    def prefill(self, texts, shard, n_shards):
+        """Encode only this process's chunks (every n_shards-th, from shard) that are not cached yet; returns the
+        number encoded. The build later finds them by their text hash (prefill_embeddings)."""
+        done = 0
+        for s in range(0, len(texts), self.chunk):
+            k, self.n_chunks = self.n_chunks, self.n_chunks + 1
+            if k % n_shards != shard:
+                continue
+            part = list(texts[s:s + self.chunk])
+            f = self._file(part)
+            if not os.path.exists(f):
+                self._encode_part(part, f); done += 1
+        return done
 
 
 def embed_cache_dir(cfg):
@@ -135,7 +161,7 @@ def make_embedder(cfg, dev):
     if cfg.embedder == "hash":
         return HashEmbedder(cfg.feat_dim)
     return STEmbedder(cfg.embed_model, dev, cfg.embed_max_tokens, cfg.embed_batch, cfg.embed_prefix,
-                      cfg.embed_bucket, cfg.embed_dtype)
+                      cfg.embed_bucket, cfg.embed_dtype, cfg.embed_tokens)
 
 
 # ---------------------------------------------------------------- reading
@@ -259,10 +285,235 @@ def keep_record(rec, cfg):
     return True, y
 
 
+# ---------------------------------------------------------------- streaming to disk
+# At large scale KUs the build held the vectors as a list of chunks and then a concatenated copy (2 x 154 GB), plus every KU
+# text and snippet as Python strings. With build_blob(spill=...) they go to files as they are made instead.
+class _NpySpill:
+    """Rows appended straight to a .npy file whose header is written last; finish() maps the finished file."""
+    HEAD = 128                                         # bytes reserved for the header (magic, length, dict, padding)
+
+    def __init__(self, path, dtype):
+        self.path, self.dtype, self.n, self.row = path, np.dtype(dtype), 0, None
+        self.f = open(path, "wb")
+        self.f.write(b"\0" * self.HEAD)
+
+    def append(self, X):
+        X = np.ascontiguousarray(X, dtype=self.dtype)
+        if self.row is None:
+            self.row = X.shape[1:]
+        elif X.shape[1:] != self.row:
+            raise ValueError(f"{self.path}: rows of shape {X.shape[1:]} after {self.row}")
+        self.f.write(X.data)
+        self.n += len(X)
+
+    def finish(self):
+        shape = (self.n, *(self.row or ()))
+        d = "{'descr': %r, 'fortran_order': False, 'shape': %r, }" % (np.lib.format.dtype_to_descr(self.dtype), shape)
+        body = d.ljust(self.HEAD - 11) + "\n"
+        if len(body) != self.HEAD - 10:
+            raise ValueError(f"{self.path}: .npy header longer than {self.HEAD} bytes")
+        self.f.seek(0)
+        self.f.write(b"\x93NUMPY\x01\x00" + len(body).to_bytes(2, "little") + body.encode("latin1"))
+        self.f.close()
+        return np.load(self.path, mmap_mode="r")
+
+
+class _StrSpill:
+    """Strings as UTF-8 bytes + offsets (exact round trip, surrogates included): to a spill file, or in memory
+    (path None). finish() -> (bytes as a uint8 array, offsets int64, n + 1)."""
+
+    def __init__(self, path=None):
+        self.out = _NpySpill(path, np.uint8) if path else bytearray()
+        if path:
+            self.out.row = ()                          # one flat byte array
+        self.off = array("q", [0])
+
+    def append(self, s):
+        b = s.encode("utf-8", "surrogatepass")
+        if isinstance(self.out, bytearray):
+            self.out += b
+        else:
+            self.out.f.write(b); self.out.n += len(b)
+        self.off.append(self.off[-1] + len(b))
+
+    def finish(self):
+        data = np.frombuffer(bytes(self.out), np.uint8) if isinstance(self.out, bytearray) else self.out.finish()
+        return data, np.array(self.off, dtype=np.int64)
+
+
+def strings_to_arrays(strings):
+    """A sequence of str -> (UTF-8 bytes, offsets), the layout of comp_snippet_data / comp_snippet_off."""
+    sp = _StrSpill()
+    for s in strings:
+        sp.append(str(s))
+    return sp.finish()
+
+
+class _SpilledTexts:
+    """The full KU texts of a build, read back one by one from their spill file (get_index pickles them as a list)."""
+
+    def __init__(self, data, off):
+        self.data, self.off = data, off
+
+    def __len__(self):
+        return len(self.off) - 1
+
+    def __iter__(self):
+        for s in range(0, len(self), 1 << 16):
+            o = self.off[s:s + (1 << 16) + 1].tolist()
+            for i in range(len(o) - 1):
+                yield bytes(self.data[o[i]:o[i + 1]]).decode("utf-8", "surrogatepass")
+
+    def remove(self):
+        f = getattr(self.data, "filename", None)
+        if f and os.path.exists(f):
+            os.remove(f)
+
+
+def _maybe_eval(cfg, y, label):
+    """False when the paper is surely in no validation / test split (make_splits). Only those papers' texts are
+    minimal-pair sources (build_minimal_pairs keeps no others), so the build need not hold the rest."""
+    if cfg.split_dir:
+        return label in ("val", "test")
+    if cfg.split_mode == "time":
+        return y is not None and y > cfg.time_T
+    return True                                        # random split: decided after the build
+
+
 # ---------------------------------------------------------------- build
-def build_blob(cfg, records=None):
+def _corpus(cfg):
+    """The records of the corpus in build order, and its balance report (build_blob, prefill_embeddings)."""
+    balance = None
+    if cfg.split_dir:                                  # stored split (sci-jepa split): no re-sampling or re-splitting
+        from sci_jepa.data.split import iter_stored, load_manifest
+        man = load_manifest(cfg.split_dir)
+        balance = {"stored_split": cfg.split_dir, "split_id": man["split_id"], **man["balance"],
+                   "pool_by_domain": man["pool_by_domain"], "selected_by_domain": {s: v["by_domain"] for s, v in man["selected"].items()}}
+        print(f"[ku_graph] stored split {cfg.split_dir} ({man['split_id']}): years {man['years']}", flush=True)
+        return iter_stored(cfg, READ_COLS), balance
+    if cfg.field_balance != "none" and cfg.max_papers:   # domain-balanced corpus
+        sel, balance = select_balanced(cfg)
+        return iter_selected(cfg, sel), balance
+    return iter_records(cfg), balance
+
+
+def _paper_kus(rec, cfg):
+    """(kus, edges, year) of one record as the index uses them, or None with the reason it is left out; and the
+    record's KU statistics (None if filtered before parsing)."""
+    keep, y = keep_record(rec, cfg)
+    if not keep:
+        return None, "filtered", None
+    kus, edges, st = S.record_to_kus(rec, cfg.ku_min_chars, cfg.optional_kus)
+    types = [t for t, _, _ in kus]
+    if len(kus) < cfg.min_kus_per_paper or not all(t in types for t in cfg.required_kus):
+        return None, "too_few_kus", st
+    if cfg.ku_mode == "paper":                         # same papers as section mode, each collapsed into one KU
+        kus, edges = S.paper_ku(kus, edges)
+    return (kus, edges, y), None, st
+
+
+def _build_progress(cfg, status, **fields):
+    """The build's progress for the dashboard's Infrastructure page (infra.monitor); never fatal."""
+    try:
+        if os.path.isdir(cfg.out_dir):
+            from sci_jepa.infra.monitor import write_progress
+            write_progress(cfg.out_dir, "KU index build", status=status, **fields)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
+def prefill_embeddings(cfg, shard, n_shards):
+    """Encode every n_shards-th chunk of the KU texts (from `shard`) into the build's embedding cache, so several
+    GPUs (other nodes too: the cache is on shared disk) encode while one build runs. Walks the corpus exactly as
+    build_blob does and keeps only the text buffer; the build skips every chunk a prefill wrote."""
+    from sci_jepa.config import resolve_device
+    emb = ResumableEmbedder(make_embedder(cfg, resolve_device(cfg.device)), embed_cache_dir(cfg))
+    print(f"[ku_graph] prefill {shard}/{n_shards} -> {emb.root}", flush=True)
+    records, _ = _corpus(cfg)
+    buf, n_pap, done, t0 = [], 0, 0, time.time()
+    for rec in records:
+        got, _, _ = _paper_kus(rec, cfg)
+        if got is None:
+            continue
+        n_pap += 1
+        buf += [text for _, text, _ in got[0]]
+        if len(buf) >= cfg.embed_chunk:
+            done += emb.prefill(buf, shard, n_shards); buf = []
+        if n_pap % 50000 == 0:
+            print(f"[ku_graph] prefill {shard}/{n_shards}: {n_pap} papers, {emb.n_chunks} chunks seen, {done} encoded "
+                  f"({time.time() - t0:.0f}s)", flush=True)
+        if cfg.max_papers and not cfg.split_dir and n_pap >= cfg.max_papers:
+            break
+    done += emb.prefill(buf, shard, n_shards)
+    print(f"[ku_graph] prefill {shard}/{n_shards} done: {n_pap} papers, {done} chunks encoded ({time.time() - t0:.0f}s)")
+
+
+def prefill_context_texts(cfg, shard, n_shards, start=0):
+    """prefill_embeddings for ku_mode="paper_masked": encode the context texts that build_context_texts encodes
+    (24.8M at 2.07M papers, one 8,192-text chunk every ~2.5 min on an L40S) into the build's embedding cache, so
+    other GPUs help a running build. Takes every n_shards-th chunk (from shard) at index >= start, skipping chunks
+    already cached; the build, which encodes chunks in order, then loads them instead of encoding them.
+    Pick start ahead of the build's current chunk so the two meet near the end.
+    Texts are generated paper by paper as the build does (same corpus order, _context_texts, the same per-paper
+    de-duplication), so chunk k holds the same texts and hash as the build's chunk k. Check: every chunk before
+    start that the build already encoded must be in the cache under that hash; if none is, the texts differ and
+    the prefill stops. (The counterfactual texts, ~72 chunks, are left to the build: they need the splits.)"""
+    from sci_jepa.config import resolve_device
+    if cfg.ku_mode != "paper_masked":
+        raise SystemExit("prefill_context_texts: only for ku_mode=paper_masked")
+    emb = ResumableEmbedder(make_embedder(cfg, resolve_device(cfg.device)), embed_cache_dir(cfg))
+    print(f"[ku_graph] text prefill {shard}/{n_shards} from chunk {start} -> {emb.root}", flush=True)
+    names = S.active_templates(cfg.pm_templates)
+    records, _ = _corpus(cfg)
+    st = {"k": 0, "cached_before": 0, "missing_before": 0, "done": 0, "skipped": 0}
+    buf, n_pap, t0 = [], 0, time.time()
+
+    def chunk(part):
+        k = st["k"]; st["k"] += 1
+        f = emb._file(part)
+        if k < start:                                   # the build's part: only checked
+            st["cached_before" if os.path.exists(f) else "missing_before"] += 1
+            if k == start - 1 or (k + 1) % 100 == 0:
+                print(f"[ku_graph] text prefill {shard}/{n_shards}: chunks 0-{k}: {st['cached_before']} found in "
+                      f"the cache, {st['missing_before']} not ({time.time() - t0:.0f}s)", flush=True)
+            if k == start - 1 and st["cached_before"] == 0:
+                raise SystemExit("text prefill: none of the build's chunks are in the cache under these settings; "
+                                 "the texts or settings differ from the build's, nothing encoded")
+            return
+        if (k - start) % n_shards != shard:
+            return
+        if os.path.exists(f):
+            st["skipped"] += 1
+            return
+        emb._encode_part(part, f); st["done"] += 1
+        if st["done"] % 10 == 0:
+            print(f"[ku_graph] text prefill {shard}/{n_shards}: chunk {k}, {st['done']} encoded, {st['skipped']} "
+                  f"already cached ({time.time() - t0:.0f}s)", flush=True)
+
+    for rec in records:
+        got, _, _ = _paper_kus(rec, cfg)
+        if got is None:
+            continue
+        n_pap += 1
+        kus, edges, _ = got
+        seen = set()                                    # the build de-duplicates (paper, text)
+        for _, txt in _context_texts(kus, edges, names):
+            if txt not in seen:
+                seen.add(txt); buf.append(txt)
+        while len(buf) >= emb.chunk:
+            chunk(buf[:emb.chunk]); buf = buf[emb.chunk:]
+        if cfg.max_papers and not cfg.split_dir and n_pap >= cfg.max_papers:
+            break
+    if buf:
+        chunk(buf)
+    print(f"[ku_graph] text prefill {shard}/{n_shards} done: {n_pap} papers, {st['k']} chunks, {st['done']} "
+          f"encoded, {st['skipped']} already cached ({time.time() - t0:.0f}s)", flush=True)
+
+
+def build_blob(cfg, records=None, spill=None):
     """records: optional iterable of dicts in the normalized schema (synthetic
-    tests); default streams cfg.parquet_dirs."""
+    tests); default streams cfg.parquet_dirs. spill: path prefix for the files the vectors, snippets and full texts
+    are streamed to while building (get_index); None keeps them in memory. The blob's values are the same either way."""
     from sci_jepa.config import resolve_device
     dev = resolve_device(cfg.device)
     emb = make_embedder(cfg, dev)
@@ -270,20 +521,21 @@ def build_blob(cfg, records=None):
         emb = ResumableEmbedder(emb, embed_cache_dir(cfg))
     t0 = time.time()
     balance = None
-    if records is None and cfg.split_dir:              # stored split (sci-jepa split): no re-sampling or re-splitting
-        from sci_jepa.data.split import iter_stored, load_manifest
-        man = load_manifest(cfg.split_dir)
-        balance = {"stored_split": cfg.split_dir, "split_id": man["split_id"], **man["balance"],
-                   "pool_by_domain": man["pool_by_domain"], "selected_by_domain": {s: v["by_domain"] for s, v in man["selected"].items()}}
-        print(f"[ku_graph] stored split {cfg.split_dir} ({man['split_id']}): years {man['years']}", flush=True)
-        records = iter_stored(cfg, READ_COLS)
-    elif records is None and cfg.field_balance != "none" and cfg.max_papers:   # domain-balanced corpus
-        sel, balance = select_balanced(cfg)
-        records = iter_selected(cfg, sel)
-    records = iter_records(cfg) if records is None else records
+    n_expected = None
+    if records is None:
+        records, balance = _corpus(cfg)
+        if balance and balance.get("stored_split"):
+            n_expected = sum(sum(v.values()) for v in balance["selected_by_domain"].values()) or None
+    _build_progress(cfg, "building index", done=0, total=n_expected, elapsed_s=0)
 
-    comp_x, comp_type, comp_paper, comp_flags, comp_snip, comp_text = [], [], [], defaultdict(list), [], []
-    role_src, role_dst, role_rel = [], [], []
+    # per-KU values in compact arrays (8 bytes per int instead of ~36 as a list of Python ints), and with spill the
+    # vectors / snippets / texts in files
+    comp_x = _NpySpill(f"{spill}.comp_x{SPILL_SUFFIX}", np.float16) if spill else []
+    comp_snip = _StrSpill(f"{spill}.comp_snippet_data{SPILL_SUFFIX}" if spill else None)
+    comp_text = _StrSpill(f"{spill}.comp_text{SPILL_SUFFIX}") if spill else []
+    comp_type, comp_paper = array("q"), array("q")
+    comp_flags = {k: array("b") for k in ("quantitative", "cites_figure", "challenged")}
+    role_src, role_dst, role_rel = array("q"), array("q"), array("q")
     p_year, p_field, p_sub, p_type, p_key, p_id, p_refs, p_dom = [], [], [], [], [], [], [], []
     p_split = []                              # stored split only: each paper's train / val / test label
     stats, skipped = Counter(), Counter()
@@ -297,19 +549,14 @@ def build_blob(cfg, records=None):
             buf_txt.clear()
 
     for rec in records:
-        keep, y = keep_record(rec, cfg)
-        if not keep:
-            skipped["filtered"] += 1
+        got, why, st = _paper_kus(rec, cfg)
+        if st:
+            stats.update(st)
+        if got is None:
+            skipped[why] += 1
             continue
-        kus, edges, st = S.record_to_kus(rec, cfg.ku_min_chars, cfg.optional_kus)
-        stats.update(st)
-        types = [t for t, _, _ in kus]
-        if len(kus) < cfg.min_kus_per_paper or not all(t in types for t in cfg.required_kus):
-            skipped["too_few_kus"] += 1
-            continue
-        if cfg.ku_mode == "paper":           # same papers as section mode, each collapsed into one KU
-            kus, edges = S.paper_ku(kus, edges)
-        elif cfg.ku_mode == "paper_masked":
+        kus, edges, y = got
+        if cfg.ku_mode == "paper_masked":
             pm_parts.append((kus, edges))
         p = len(p_year)
         p_year.append(-1 if y is None else y)
@@ -320,7 +567,7 @@ def build_blob(cfg, records=None):
         p_key.append(S.openalex_key(rec.get("openalex_id")))
         p_id.append(str(rec.get("paper_id")))
         p_refs.append(S.referenced(rec))
-        if cfg.ku_mode != "paper":
+        if cfg.ku_mode != "paper" and _maybe_eval(cfg, y, rec.get("_split")):
             mp_src += [(n_comp + k, text) for k, (t, text, _) in enumerate(kus) if t in S.MP_TYPES]
         for t, text, fl in kus:
             buf_txt.append(text)
@@ -334,7 +581,11 @@ def build_blob(cfg, records=None):
         if len(buf_txt) >= cfg.embed_chunk:
             flush()
         if len(p_year) % 10000 == 0:
-            print(f"[ku_graph] {len(p_year)} papers, {n_comp} KUs ({time.time() - t0:.0f}s)", flush=True)
+            el = time.time() - t0
+            print(f"[ku_graph] {len(p_year)} papers, {n_comp} KUs ({el:.0f}s)", flush=True)
+            _build_progress(cfg, "building index", task="papers and KU texts", done=len(p_year), total=n_expected,
+                            elapsed_s=round(el), queries_per_s=round(len(p_year) / max(el, 1e-9), 1),
+                            eta_max_s=round((n_expected - len(p_year)) * el / len(p_year)) if n_expected else None)
         if cfg.max_papers and not cfg.split_dir and len(p_year) >= cfg.max_papers:   # stored split: capped per split
             break
     flush()
@@ -342,9 +593,9 @@ def build_blob(cfg, records=None):
     if P == 0:
         raise RuntimeError("no papers selected -- check parquet_dirs / subsets / split_mode")
 
-    comp_type = np.asarray(comp_type, dtype=np.int64)
-    comp_paper = np.asarray(comp_paper, dtype=np.int64)
-    comp_x = np.concatenate(comp_x, 0)
+    comp_type = np.array(comp_type, dtype=np.int64)
+    comp_paper = np.array(comp_paper, dtype=np.int64)
+    comp_x = comp_x.finish() if spill else np.concatenate(comp_x, 0)
 
     # ---- fields --------------------------------------------------------------
     fields = sorted(set(p_field)); subs = sorted(set(p_sub))
@@ -369,7 +620,7 @@ def build_blob(cfg, records=None):
                                cfg.proxy_tau, cfg.proxy_topk, dev)
         if len(pr):
             a, b = ids[pr[:, 0]], ids[pr[:, 1]]
-            role_src += a.tolist(); role_dst += b.tolist(); role_rel += [S.REL_ID["proxy"]] * len(a)
+            role_src.extend(a.tolist()); role_dst.extend(b.tolist()); role_rel.extend([S.REL_ID["proxy"]] * len(a))
             pp_s += comp_paper[a].tolist(); pp_d += comp_paper[b].tolist(); pp_w += [2] * len(a)
         print(f"[ku_graph] proxy '{t}' edges: {len(pr)} (tau={cfg.proxy_tau})")
 
@@ -391,15 +642,16 @@ def build_blob(cfg, records=None):
               f"(context {cfg.embed_max_tokens} tokens)")
     if getattr(emb, "reused", 0):
         print(f"[ku_graph] resumed: {emb.reused} texts loaded from the embedding cache")
+    snip_data, snip_off = comp_snip.finish()           # KU text snippets as UTF-8 bytes + offsets (GraphIndex)
     return {"comp_x": comp_x, "comp_type": comp_type, "comp_paper": comp_paper,
-            "comp_quantitative": np.asarray(comp_flags["quantitative"]),
-            "comp_cites_figure": np.asarray(comp_flags["cites_figure"]),
-            "comp_challenged": np.asarray(comp_flags["challenged"]),
-            "comp_snippet": np.asarray(comp_snip, dtype=object),
-            "comp_text": comp_text,                    # full texts: saved to a side file by get_index
+            "comp_quantitative": np.array(comp_flags["quantitative"], dtype=bool),
+            "comp_cites_figure": np.array(comp_flags["cites_figure"], dtype=bool),
+            "comp_challenged": np.array(comp_flags["challenged"], dtype=bool),
+            "comp_snippet_data": snip_data, "comp_snippet_off": snip_off,
+            "comp_text": _SpilledTexts(*comp_text.finish()) if spill else comp_text,   # full texts: a side file (get_index)
             "pc_ptr": pc_ptr, "pc_idx": order,
-            "role_src": np.asarray(role_src, dtype=np.int64), "role_dst": np.asarray(role_dst, dtype=np.int64),
-            "role_rel": np.asarray(role_rel, dtype=np.int64),
+            "role_src": np.array(role_src, dtype=np.int64), "role_dst": np.array(role_dst, dtype=np.int64),
+            "role_rel": np.array(role_rel, dtype=np.int64),
             "pp_src": np.asarray(pp_s, dtype=np.int64), "pp_dst": np.asarray(pp_d, dtype=np.int64),
             "pp_w": np.asarray(pp_w, dtype=np.int64),
             "paper_field": np.asarray([fid[f] for f in p_field]), "paper_subfield": np.asarray([sid[s] for s in p_sub]),
@@ -432,11 +684,25 @@ def _topic_donors(eval_splits, comp_type, comp_x, pc_ptr, order):
             sel = cs[prob[cs]] if prob[cs].any() else cs
             v = comp_x[sel].astype(np.float32).mean(0) - mu
             V.append(v / (np.linalg.norm(v) + 1e-8))
-        V = np.stack(V); sim = V @ V.T
-        np.fill_diagonal(sim, -np.inf)
+        V = np.stack(V)
+        if len(papers) <= DONOR_DENSE_MAX:             # the full similarity matrix, as always
+            sim = V @ V.T
+            np.fill_diagonal(sim, -np.inf)
+            best = sim.argmax(1)
+        else:                                          # n x n would not fit (250 GB at 250k papers): row blocks,
+            n, best = len(papers), np.empty(len(papers), np.int64)   # same rule (first maximum, never itself)
+            step = max(1, DONOR_BLOCK_BYTES // (4 * n))
+            for s in range(0, n, step):
+                sim = V[s:s + step] @ V.T
+                sim[np.arange(len(sim)), np.arange(s, s + len(sim))] = -np.inf
+                best[s:s + len(sim)] = sim.argmax(1)
         for i, p in enumerate(papers):
-            donor[p] = papers[int(np.argmax(sim[i]))]
+            donor[p] = papers[int(best[i])]
     return donor
+
+
+DONOR_DENSE_MAX = 65536                # papers per evaluation split scored with one n x n matrix (16 GB fp32)
+DONOR_BLOCK_BYTES = 1 << 30            # beyond that: rows per block so that a block of scores is ~1 GB
 
 
 def build_minimal_pairs(emb, src, comp_paper, eval_splits, comp_type, comp_x, pc_ptr, order):
@@ -469,6 +735,37 @@ def build_minimal_pairs(emb, src, comp_paper, eval_splits, comp_type, comp_x, pc
             "mp_snippet": np.asarray([t[:240] for t in texts], dtype=object), "mp_text": texts}
 
 
+def _context_texts(kus, edges, names):
+    """One paper's (template name, context text) pairs in build order: the templates that have something of their
+    target type to predict and give a non-empty text (build_context_texts, prefill_context_texts)."""
+    out = []
+    for name in names:
+        given, targets = S.TEMPLATES[name]
+        if not any(t == k for k, _, _ in kus for t in targets):
+            continue                                       # nothing of the target type to predict
+        txt = S.compose_text(kus, edges, given)
+        if txt:
+            out.append((name, txt))
+    return out
+
+
+def _encode_reporting(cfg, emb, texts, task):
+    """emb.encode(texts), one cache chunk at a time with the build's progress written after each chunk, so the
+    dashboard's "KU index build" row moves during a long encoding (paper_masked: ~3,100 chunks at 2.07M papers).
+    Chunk boundaries are those of one emb.encode(texts) call, so cached chunks are found the same way."""
+    if not isinstance(emb, ResumableEmbedder) or len(texts) <= emb.chunk:
+        return np.asarray(emb.encode(texts), dtype=np.float16)
+    out, n, t0, reused0 = [], len(texts), time.time(), emb.reused
+    for s in range(0, n, emb.chunk):
+        out.append(np.asarray(emb.encode(texts[s:s + emb.chunk]), dtype=np.float16))
+        done, el = min(s + emb.chunk, n), time.time() - t0
+        new = done - (emb.reused - reused0)                # texts encoded here, not loaded from the cache
+        _build_progress(cfg, "building index", task=task, done=done, total=n, elapsed_s=round(el),
+                        queries_per_s=round(new / max(el, 1e-9), 1),
+                        eta_max_s=round((n - done) * el / new) if new else None)
+    return np.concatenate(out)
+
+
 def build_context_texts(cfg, emb, parts, p_field, p_sub, splits):
     """ku_mode="paper_masked": for every paper and template, the given KUs joined into ONE
     text and encoded together (ctx_*). For val / test papers also counterfactual forward texts
@@ -478,13 +775,7 @@ def build_context_texts(cfg, emb, parts, p_field, p_sub, splits):
     names = S.active_templates(cfg.pm_templates)
     texts, c_paper, c_tpl, seen = [], [], [], {}
     for p, (kus, edges) in enumerate(parts):
-        for name in names:
-            given, targets = S.TEMPLATES[name]
-            if not any(t == k for k, _, _ in kus for t in targets):
-                continue                                   # nothing of the target type to predict
-            txt = S.compose_text(kus, edges, given)
-            if not txt:
-                continue
+        for name, txt in _context_texts(kus, edges, names):
             key = (p, txt)
             if key not in seen:                            # identical texts share one row
                 seen[key] = len(texts); texts.append(txt)
@@ -514,8 +805,9 @@ def build_context_texts(cfg, emb, parts, p_field, p_sub, splits):
                     cf_paper.append(p); cf_kind.append(kind); cf_donor.append(int(d))
     print(f"[ku_graph] paper_masked: {len(texts)} context texts ({len(names)} templates) + "
           f"{len(cf_txt)} counterfactual texts to encode", flush=True)
-    X = np.asarray(emb.encode(texts), dtype=np.float16) if texts else np.zeros((0, 1), np.float16)
-    CF = np.asarray(emb.encode(cf_txt), dtype=np.float16) if cf_txt else np.zeros((0, X.shape[1]), np.float16)
+    X = _encode_reporting(cfg, emb, texts, "encoding paper texts") if texts else np.zeros((0, 1), np.float16)
+    CF = (_encode_reporting(cfg, emb, cf_txt, "encoding counterfactual paper texts") if cf_txt
+          else np.zeros((0, X.shape[1]), np.float16))
     print(f"[ku_graph] paper_masked texts encoded in {time.time() - t0:.0f}s")
     return {"ctx_x": X, "ctx_row": np.asarray(rows, dtype=np.int64), "ctx_paper": np.asarray(c_paper, dtype=np.int64),
             "ctx_tpl": np.asarray(c_tpl, dtype=np.int64), "template_names": S.TEMPLATE_NAMES,
@@ -571,7 +863,21 @@ if __name__ == "__main__":
     from sci_jepa.training.train import parse_overrides
     ap = argparse.ArgumentParser("ku_graph")
     ap.add_argument("--set", nargs="*", default=[])
-    cfg = PaperAConfig().override(**parse_overrides(ap.parse_args().set))
+    ap.add_argument("--prefill", default="", help="i/n: only encode every n-th text chunk into the embedding cache "
+                    "(from i) and exit; run several on other GPUs while one build runs (prefill_embeddings)")
+    ap.add_argument("--prefill-texts", default="", help="i/n: the same for the paper_masked context texts "
+                    "(prefill_context_texts); with --from K only chunks >= K")
+    ap.add_argument("--from", dest="start", type=int, default=0)
+    args = ap.parse_args()
+    cfg = PaperAConfig().override(**parse_overrides(args.set))
+    if args.prefill_texts:
+        i, n = (int(x) for x in args.prefill_texts.split("/"))
+        prefill_context_texts(cfg, i, n, args.start)
+        raise SystemExit(0)
+    if args.prefill:
+        i, n = (int(x) for x in args.prefill.split("/"))
+        prefill_embeddings(cfg, i, n)
+        raise SystemExit(0)
     from sci_jepa.data.graph_index import get_index
     gi = get_index(cfg)
     import json

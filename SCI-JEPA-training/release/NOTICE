@@ -1,0 +1,6 @@
+SCI-JEPA
+Copyright the SCI-JEPA authors, TIB - Leibniz Information Centre for Science and Technology.
+
+Trained on laion/Scientific-Summaries (CC-BY-4.0): LAION e.V. (2025), Project Alexandria: Structured Summaries of Scientific Papers at Scale, arXiv:2502.19413. The summaries were derived from the papers; the papers' full texts are not included.
+
+Components: Alibaba-NLP/gte-modernbert-base (Apache-2.0) text encoder.

@@ -11,6 +11,10 @@ sentence-transformers>=3.0
 nvidia-ml-py>=12
 psutil>=5.9
 
+[api]
+fastapi>=0.110
+uvicorn>=0.29
+
 [dev]
 pytest>=7
 

@@ -1,0 +1,18 @@
+/* Shared look for the hosted-only pages (login, notes, queue); same tokens as the dashboard. */
+:root{--bg:#f6f6f3;--panel:#fff;--text:#18181b;--muted:#6b6b70;--line:#e2e2de;--accent:#2563eb;--good:#16a34a;--bad:#dc2626;--warn:#d97706;--soft:#f1f1ee}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111113;--panel:#1b1b1f;--text:#ececef;--muted:#a1a1aa;--line:#2e2e33;--accent:#60a5fa;--soft:#232328}}
+:root[data-theme="dark"]{--bg:#111113;--panel:#1b1b1f;--text:#ececef;--muted:#a1a1aa;--line:#2e2e33;--accent:#60a5fa;--soft:#232328}
+*{box-sizing:border-box}body{margin:0;font:14px/1.5 -apple-system,system-ui,sans-serif;background:var(--bg);color:var(--text)}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+h1{font-size:17px;margin:0;margin-right:auto}
+main{padding:16px;max-width:1200px;margin:0 auto}
+a{color:var(--accent)}.muted{color:var(--muted)}
+button,input,textarea,select{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--text)}
+button{cursor:pointer}button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600}td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.scroll{overflow-x:auto}
+.badge{padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;color:#fff;background:var(--muted)}
+.badge.RUNNING{background:var(--accent)}.badge.PENDING{background:var(--warn)}.badge.COMPLETING{background:var(--good)}.badge.FAILED{background:var(--bad)}
+.sitenav{display:inline-flex;gap:12px;align-items:center;font-size:13px}.sitenav a{text-decoration:none}.sitenav a.on{font-weight:650;color:var(--text)}

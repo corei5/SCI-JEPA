@@ -26,6 +26,7 @@ dependencies = [
 [project.optional-dependencies]
 llm = ["accelerate>=0.30"]                       # LLM-Reasoning comparison system
 notebook = ["ipykernel", "nbconvert"]
+api = ["fastapi>=0.110", "uvicorn>=0.29"]          # sci-jepa api: the HTTP API (tests also need httpx)
 dev = ["pytest>=7"]
 
 [project.scripts]

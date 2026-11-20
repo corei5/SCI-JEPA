@@ -24,7 +24,7 @@ SCI-JEPA/
 ├── notebooks/               paper_a_local.ipynb: the pipeline with a live dashboard
 ├── scripts/                 run_local.sh, check_environment.py, data/ (download, normalize; split: sci-jepa split)
 ├── cluster/grete/           Slurm: run_paper_a.sh (setup / submit / dist / tunnel), site.env, normalize.sbatch
-├── docs/                    paper_a.md (method), evaluation.md, data.md, cluster_grete.md
+├── docs/                    CODE_DOCUMENTATION.md (how the code works), paper_a.md (method), evaluation.md, data.md, cluster_grete.md
 ├── tests/                   fast package tests, normalizer tests, the slow smoke test
 ├── pyproject.toml           package metadata, dependencies, the `sci-jepa` command
 └── requirements.txt         exact versions of the reported runs
@@ -63,6 +63,8 @@ sci-jepa evaluate results runs/paper_a_results/BENCH   # 6. leaderboard + hypoth
 ```
 
 `sci-jepa run` prints the dashboard address (`http://localhost:8765/`). Results, trained models and figures go to `runs/paper_a_results/`. On a Slurm cluster, use `cluster/grete/run_paper_a.sh` ([docs/cluster_grete.md](docs/cluster_grete.md)); it also splits a run over several GPUs and opens the dashboard in your local browser.
+
+To share the dashboard with the team, it is also hosted on Vercel behind a team password. With `SCIJEPA_PUSH_URL` and `SCIJEPA_PUSH_TOKEN` set, everyrun  pushes its dashboard there while it trains (on Grete, `run_paper_a.sh submit` pushes from the login node instead). `scripts/import_logs.py` adds earlier runs from their SLURM logs. See [deploy/vercel/README.md](deploy/vercel/README.md).
 
 Graph-JEPA pretraining in [`Analysis/`](../Analysis/README.md) uses the same dashboard. Those runs are Lightning, write `runs/<name>/live.json` into `runs/paper_a_results/dashboard`, and show up in All runs and in Training dynamics. Start them with `uv run graph-jepa train papers` from the repository root (the `sci-jepa` command stays this package).
 

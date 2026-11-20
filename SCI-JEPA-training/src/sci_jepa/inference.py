@@ -238,10 +238,13 @@ class SciJEPA:
         return sorted(zip(s.tolist(), candidates), reverse=True)
 
     @torch.no_grad()
-    def consistency(self, claim, evidence, paper=None):
+    def consistency(self, claim, evidence, paper=None, abstain_below=None):
         """P(supports), P(contradicts) for a claim and a piece of evidence (link hidden), from the
         relation decoder. paper: read the pair inside its paper (and neighbouring papers with an
-        index), as in evaluation; claim / evidence are matched to the paper's KUs or added to it."""
+        index), as in evaluation; claim / evidence are matched to the paper's KUs or added to it.
+        abstain_below: human oversight; "decision" is "abstain" when the larger probability is below it
+        (these probabilities are calibrated; the recommended value is in the model card). The retrieval
+        ranking's confidence is NOT reliable: do not filter rankings by their score."""
         if paper is None:
             X = self.text_encoder.encode([claim, evidence])
             view = {"x": np.concatenate([np.zeros((1, X.shape[1])), X]).astype(np.float32),
@@ -269,4 +272,7 @@ class SciJEPA:
             i, j = idx["claim"] + 1, idx["evidence"] + 1    # +1: the hub is token 0
         logit = self.model.inverse(h[:, i], h[:, j])[0]
         p = torch.softmax(logit[[_SUP, _CON]], -1).cpu().numpy()
-        return {"supports": float(p[0]), "contradicts": float(p[1])}
+        dec = "supports" if p[0] >= p[1] else "contradicts"
+        if abstain_below is not None and float(p.max()) < abstain_below:
+            dec = "abstain"
+        return {"supports": float(p[0]), "contradicts": float(p[1]), "decision": dec}

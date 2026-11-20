@@ -61,6 +61,70 @@ def test_checkpoint_of_other_settings_is_ignored(tmp_path):
     assert len(other["history"]) == STEPS                                # trained from the start, not resumed
 
 
+def test_keep_steps_are_evenly_spaced_and_end_at_the_last_step():
+    assert T.keep_steps(331720, 10) == [33171, 66343, 99515, 132687, 165859, 199031, 232203, 265375, 298547, 331719]
+    assert T.keep_steps(5, 10) == [0, 1, 2, 3, 4]                       # fewer steps than kept checkpoints
+    assert T.keep_steps(100, 0) == []
+    assert "keep_ckpts" not in T._ckpt_key(PaperAConfig().override(keep_ckpts=10), 0)   # old checkpoints still resume
+
+
+def test_checkpoint_keyed_with_a_now_ignored_setting_still_resumes(tmp_path):
+    """Checkpoints written before "arms" joined _CKPT_IGNORE carry it in their key; they must still resume."""
+    import torch
+    key = T._ckpt_key(PaperAConfig(), 0)
+    path = str(tmp_path / "old.pt")
+    torch.save({"version": T.CKPT_VERSION, "key": {**key, "arms": "('reference',)", "keep_ckpts": "0"}}, path)
+    assert T._load_ckpt(path, key, lambda *_: None) is not None
+    torch.save({"version": T.CKPT_VERSION, "key": {**key, "lr": "1.0"}}, path)          # a real difference
+    assert T._load_ckpt(path, key, lambda *_: None) is None
+
+
+def test_resume_file_round_trips_every_array_kind(tmp_path):
+    """_save_ckpt writes arrays as raw bytes outside pickle: every dtype, shape and sharing must come back exactly."""
+    import random
+
+    import torch
+    shared = torch.randn(3, 4)
+    payload = {"model": {"w": torch.randn(5, 7), "bf": torch.randn(4, 3).bfloat16(), "half": torch.randn(2).half(),
+                         "i": torch.arange(6).reshape(2, 3), "mask": torch.tensor([True, False]),
+                         "step": torch.tensor(17.0), "empty": torch.zeros(0, 4),
+                         "strided": torch.randn(4, 6)[:, ::2]},                    # non-contiguous
+               "a": shared, "b": shared,
+               "rng": {"numpy": np.random.get_state(), "python": random.getstate(), "torch": torch.get_rng_state()},
+               "sampler": {"queue": np.arange(10, dtype=np.int64)[::-1], "scalar": np.array(2.5),
+                           "none": np.zeros((0,), np.float32), "obj": np.array(["x", None], dtype=object)},
+               "history": [{"jepa": 0.5}], "version": T.CKPT_VERSION}
+    path = str(tmp_path / "ck.pt")
+    T._save_ckpt(path, payload)
+    back = T._read_ckpt(path)
+    for k, v in payload["model"].items():
+        assert back["model"][k].dtype == v.dtype and torch.equal(back["model"][k], v), k
+    assert back["a"] is back["b"] and torch.equal(back["a"], shared)
+    assert torch.equal(back["rng"]["torch"], payload["rng"]["torch"]) and back["rng"]["python"] == payload["rng"]["python"]
+    for x, y in zip(back["rng"]["numpy"], payload["rng"]["numpy"]):
+        assert np.array_equal(x, y) if isinstance(y, np.ndarray) else x == y
+    for k, v in payload["sampler"].items():
+        assert back["sampler"][k].dtype == v.dtype and back["sampler"][k].shape == v.shape
+        assert np.array_equal(back["sampler"][k], v), k
+    assert back["history"] == payload["history"]
+    with open(path, "r+b") as f:                                          # a write cut short: unreadable, not wrong
+        f.truncate(os.path.getsize(path) - 8)
+    assert T._load_ckpt(path, {}, lambda *_: None) is None
+
+
+@pytest.mark.slow
+def test_kept_weights_load_into_the_model(tmp_path):
+    from safetensors import safe_open
+    cfg = PaperAConfig().override(**SIZES["tiny"], **FAST, out_dir=str(tmp_path), keep_ckpts=4)
+    gi = get_index(cfg)
+    T.train_one(cfg, gi, 0, log=lambda *_: None, save_dir=str(tmp_path / "model"))
+    kept = sorted(os.listdir(tmp_path / "model" / "checkpoints"))
+    assert kept == ["step0000003.safetensors", "step0000006.safetensors", "step0000009.safetensors",
+                    "step0000012.safetensors"]
+    with safe_open(str(tmp_path / "model" / "checkpoints" / kept[-1]), "pt") as f:
+        assert f.metadata()["step"] == "12" and set(f.keys()) == set(T.PaperAModel(cfg).state_dict())
+
+
 def test_llm_arms_expand_one_per_model():
     cfg = PaperAConfig().override(llm_models=("Qwen/Qwen2.5-7B-Instruct", "mistralai/Mistral-7B-Instruct-v0.3"))
     arms = T.expand_llm_arms([("bm25", {"baseline": "bm25"}), ("LLM-Reasoning", {"baseline": "llm"})], cfg)

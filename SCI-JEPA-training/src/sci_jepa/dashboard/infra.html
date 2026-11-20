@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Training infrastructure</title>
 <style>
-/* Same palette as the training dashboard; one column of cards, a run table, four live charts. */
+/* Same palette as the training dashboard. Per job (node, cluster): a row of cards, a run table, four live charts. */
 :root{--bg:#f6f6f3;--panel:#fff;--text:#18181b;--muted:#6b6b70;--line:#e2e2de;--accent:#2563eb;--good:#16a34a;--bad:#dc2626;--warn:#d97706;--soft:#f1f1ee}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111113;--panel:#1b1b1f;--text:#ececef;--muted:#a1a1aa;--line:#2e2e33;--accent:#60a5fa;--soft:#232328}}
 :root[data-theme="dark"]{--bg:#111113;--panel:#1b1b1f;--text:#ececef;--muted:#a1a1aa;--line:#2e2e33;--accent:#60a5fa;--soft:#232328}
@@ -24,85 +24,154 @@ tr:last-child td{border-bottom:0}
 .chart h3{margin:0 0 4px;font-size:13px}
 .chart canvas{height:210px!important}
 .st{display:inline-block;padding:0 7px;border-radius:999px;font-size:12px;background:var(--soft)}
-.st.training{color:var(--good)}.st.llm{color:var(--accent)}.st.evaluating{color:var(--warn)}
+.st.training{color:var(--good)}.st.llm{color:var(--accent)}.st.evaluating,.st.validating{color:var(--warn)}
+.st.building{color:var(--accent)}
+.bar{display:inline-block;width:90px;height:8px;border-radius:4px;background:var(--soft);vertical-align:middle;margin-right:6px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent)}
+td small{color:var(--muted)}
 .note{font-size:12px;color:var(--muted);margin-top:10px}
 #err{color:var(--bad)}
+.job{margin:18px 0 26px}.job+.job{border-top:1px solid var(--line);padding-top:16px}
+.job h2{font-size:15px;margin:0 0 2px}
+details.ended{margin:12px 0}details.ended summary{cursor:pointer;color:var(--muted)}
 </style>
 <script src="vendor/chart.umd.min.js"></script>
 </head><body>
 <h1>Training infrastructure <span class="muted" style="font-weight:400">· live, updates every second</span></h1>
-<div class="muted" id="sys">waiting for infra/live.json …</div><div id="err"></div>
-<div class="cards" id="cards"></div>
-<div class="tblwrap"><table id="runs"><thead><tr><th>Run</th><th>Status</th><th>Device</th><th>Epoch</th><th>Step</th>
-<th>Steps/s</th><th>Instances/s</th><th>Elapsed</th><th>Max. time left</th><th>GPU mem (alloc / peak)</th><th>Best epoch</th></tr></thead><tbody></tbody></table></div>
+<div class="muted" id="sum">waiting for infra/jobs …</div><div id="err"></div>
+<div id="jobs"></div>
+<details class="ended" id="ended" hidden><summary></summary><div class="tblwrap"><table><thead><tr><th>Cluster</th><th>Job</th><th>Host</th>
+<th>Started</th><th>Last report</th><th>Runs finished</th></tr></thead><tbody></tbody></table></div></details>
+<template id="tpl-job"><section class="job"><h2 data-x="title"></h2><div class="muted" data-x="sys"></div>
+<div class="cards" data-x="cards"></div>
+<div class="tblwrap"><table><thead><tr><th>Run</th><th>GPU</th><th>Status</th><th>Progress</th><th>Epoch</th>
+<th>Loss (recent · epoch)</th><th>Validation bal. MRR</th><th>Speed</th><th>Elapsed</th><th>Max. time left</th><th>Finishes</th>
+<th>GPU mem (alloc / peak)</th><th>Best epoch</th></tr></thead><tbody data-x="runs"></tbody></table></div>
 <div class="grid">
- <div class="chart"><h3>GPU memory in use per device (GB)</h3><canvas id="c-mem"></canvas></div>
- <div class="chart"><h3>Training throughput (steps / s)</h3><canvas id="c-thr"></canvas></div>
- <div class="chart"><h3>Physical GPU: power (W) and temperature (°C)</h3><canvas id="c-pow"></canvas></div>
- <div class="chart"><h3>Job CPU (% of allocated cores) and node RAM (%)</h3><canvas id="c-cpu"></canvas></div>
-</div>
-<p class="note">On MIG slices the driver reports memory per slice but no utilization per slice; power and temperature are those
-of the whole physical GPU, which other jobs' slices share. "Max. time left" assumes the run trains to its maximum epoch count;
-early stopping usually ends it sooner. Runs resumed from a checkpoint continue their step count.</p>
+ <div class="chart"><h3>GPU memory in use per device (GB)</h3><canvas data-x="c-mem"></canvas></div>
+ <div class="chart"><h3>Training throughput (steps / s)</h3><canvas data-x="c-thr"></canvas></div>
+ <div class="chart"><h3>Physical GPU: power (W) and temperature (°C)</h3><canvas data-x="c-pow"></canvas></div>
+ <div class="chart"><h3>Job CPU (% of allocated cores) and node RAM (%)</h3><canvas data-x="c-cpu"></canvas></div>
+</div></section></template>
+<p class="note">Every job that reported in the last 15 minutes is shown, on any node or cluster; older ones are listed under
+"ended jobs". The hosted site shows a job once its cluster has pushed (about every 30–60 s). On MIG slices the driver reports memory per slice but no utilization per slice; power and temperature are those
+of the whole physical GPU, which other jobs' slices share. "Max. time left" and "Finishes" assume the run trains to its maximum
+epoch count at its recent speed (early stopping usually ends it sooner) and leave out the final test evaluation, which takes about an
+hour at full scale. Loss: the JEPA loss averaged over the last few seconds and over the current epoch. Validation: the latest
+validation pass, at an epoch end or a live pass for the curves. Runs resumed from a checkpoint continue their step count.</p>
 <script>
 const $=id=>document.getElementById(id);
+const clock=t=>{if(t==null||isNaN(t))return "–";const d=new Date(t*1000),now=new Date();
+  const hm=d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+  return d.toDateString()===now.toDateString()?"today "+hm:d.toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"})+" "+hm;};
+const short=r=>String(r||"").split("__").filter(x=>x&&x!=="BENCH").join(" ");
+const frac=p=>p.step!=null&&p.n_steps?Math.max(0,Math.min(1,(p.step+1)/p.n_steps)):(p.done!=null&&p.total?Math.min(1,p.done/p.total):null);
+const finish=p=>p.eta_finish??(p.eta_max_s!=null&&p.time?p.time+p.eta_max_s:null);
 const PAL=["#2563eb","#dc2626","#16a34a","#d97706","#9333ea","#0891b2","#db2777","#65a30d"];
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const dur=s=>s==null||isNaN(s)?"–":(s<0?"–":(s>=86400?Math.floor(s/86400)+"d ":"")+String(Math.floor(s%86400/3600)).padStart(2,"0")+":"+String(Math.floor(s%3600/60)).padStart(2,"0")+":"+String(Math.floor(s%60)).padStart(2,"0"));
 const f=(v,d=2)=>v==null||isNaN(v)?"–":(+v).toFixed(d);
-const charts={};
-function chart(id,yTitle){
-  if(charts[id])return charts[id];
+const ACTIVE_S=15*60;
+const esc=v=>String(v??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const charts=new WeakMap();
+function chart(el,yTitle){
+  if(charts.has(el))return charts.get(el);
   if(typeof Chart==="undefined")return null;
-  charts[id]=new Chart($(id),{type:"line",data:{labels:[],datasets:[]},options:{animation:false,responsive:true,maintainAspectRatio:false,
+  charts.set(el,new Chart(el,{type:"line",data:{labels:[],datasets:[]},options:{animation:false,responsive:true,maintainAspectRatio:false,
     interaction:{mode:"index",intersect:false},plugins:{legend:{labels:{color:css("--muted"),boxWidth:10,font:{size:11}}}},
     elements:{point:{radius:0},line:{borderWidth:1.6}},
     scales:{x:{ticks:{color:css("--muted"),maxTicksLimit:6,font:{size:10}},grid:{color:css("--line")}},
-            y:{beginAtZero:true,title:{display:!!yTitle,text:yTitle,color:css("--muted")},ticks:{color:css("--muted"),font:{size:10}},grid:{color:css("--line")}}}}});
-  return charts[id];
+            y:{beginAtZero:true,title:{display:!!yTitle,text:yTitle,color:css("--muted")},ticks:{color:css("--muted"),font:{size:10}},grid:{color:css("--line")}}}}}));
+  return charts.get(el);
 }
-function setSeries(id,labels,series){
-  const c=chart(id);if(!c)return;
+function setSeries(el,labels,series){
+  const c=chart(el);if(!c)return;
   c.data.labels=labels;
   series.forEach((s,i)=>{if(!c.data.datasets[i])c.data.datasets[i]={label:s.label,data:[],borderColor:PAL[i%PAL.length],backgroundColor:PAL[i%PAL.length]};
     c.data.datasets[i].label=s.label;c.data.datasets[i].data=s.data;});
   c.data.datasets.length=series.length;c.update("none");
 }
-function render(d){
+const sections=new Map();
+function section(key){
+  if(!sections.has(key)){const el=$("tpl-job").content.firstElementChild.cloneNode(true);
+    const q={};el.querySelectorAll("[data-x]").forEach(x=>q[x.dataset.x]=x);sections.set(key,{el,q});}
+  return sections.get(key);
+}
+function render(d,q){
   const s=d.system||{},n=d.now||{},H=d.history||[];
-  $("sys").textContent=`job ${s.job} on ${s.host} · ${s.partition||"local"} · driver ${s.driver||"–"} · CUDA ${s.cuda||"–"} · torch ${s.torch||"–"} · ${(s.cpu||{}).cores_allocated||"?"} CPU cores · started ${s.started||"–"}`;
+  q.title.textContent=`${s.cluster?s.cluster+" · ":""}job ${s.job} on ${s.host}`;
+  q.sys.textContent=`${s.partition||"local"} · driver ${s.driver||"–"} · CUDA ${s.cuda||"–"} · torch ${s.torch||"–"} · ${(s.cpu||{}).cores_allocated||"?"} CPU cores · started ${s.started||"–"}`;
   const prog=n.progress||[],thr=prog.reduce((a,p)=>a+(p.steps_per_s||0),0);
-  const gpusTxt=(s.gpus||"").split("\n").filter(l=>l.trim()).map(l=>l.trim()).join(" · ");
+  const gpusTxt=(s.gpus||"").split("\n").filter(l=>l.trim()).map(l=>l.trim().replace(/\s*\(UUID:[^)]*\)/,"")).join(" · ");
   const runs=n.runs;
-  $("cards").innerHTML=[
+  const gpuRun={};prog.forEach(p=>{if(p.gpu!=null&&p.gpu!=="")String(p.gpu).split(",").forEach(g=>gpuRun[g.trim()]=short(p.run));});
+  const fin=prog.map(p=>[finish(p),p]).filter(([t])=>t).sort((a,b)=>a[0]-b[0]);
+  q.cards.innerHTML=[
     ["Job time left",dur(n.left_s),`limit ${s.time_limit||"–"} · running ${dur(n.elapsed_s)}`],
     ["Runs finished",runs?`${runs.done} / ${runs.total}`:"–",runs?`${Math.round(100*runs.done/Math.max(runs.total,1))}% of the planned arm × seed runs`:"plan.json not written yet"],
     ["Active processes",String(prog.length),prog.map(p=>p.status).join(", ")||"none reporting"],
+    ["Next to finish",fin.length?clock(fin[0][0]):"–",fin.length?`${short(fin[0][1].run)} · last: ${short(fin[fin.length-1][1].run)} ${clock(fin[fin.length-1][0])}`:"no estimate yet (needs a few minutes of training)"],
     ["Throughput",f(thr,2)+" steps/s",f(prog.reduce((a,p)=>a+(p.instances_per_s||0),0),0)+" instances/s"],
     ["GPUs",String((n.gpus||[]).filter(g=>g.kind==="mig").length||(n.gpus||[]).length),gpusTxt||"–"],
     ["Job CPU / RAM",f((n.cpu||{}).cpu_pct_of_allocated,0)+"%",`${f((n.cpu||{}).rss_gb,1)} GB resident · node RAM ${f((n.cpu||{}).node_mem_used_pct,0)}%`],
   ].map(([b,v,sm])=>`<div class="card"><b>${b}</b><span>${v}</span><small>${sm}</small></div>`).join("");
-  $("runs").tBodies[0].innerHTML=prog.map(p=>`<tr><td>${p.run}</td><td><span class="st ${p.status}">${p.status}${p.task?": "+p.task:""}</span></td>
-    <td>${(p.device||"").replace("NVIDIA ","")}</td><td>${p.epoch!=null?f(p.epoch,2)+" / "+(p.max_epochs||"–"):"–"}</td>
-    <td>${p.step!=null?p.step+" / "+p.n_steps:(p.done!=null?p.done+" / "+p.total:"–")}</td><td>${f(p.steps_per_s,2)}</td>
-    <td>${f(p.instances_per_s!=null?p.instances_per_s:p.queries_per_s,1)}</td><td>${dur(p.elapsed_s)}</td><td>${dur(p.eta_max_s)}</td>
-    <td>${f(p.gpu_mem_alloc_gb,1)} / ${f(p.gpu_mem_peak_gb,1)} GB</td><td>${p.best_epoch??"–"}</td></tr>`).join("")
-    ||`<tr><td colspan="11" class="muted">no training process has reported yet</td></tr>`;
+  q.runs.innerHTML=prog.map(p=>{const q=frac(p),v=p.val_bal_mrr;
+    const st=String(p.status||"").split(" ")[0];
+    const pos=p.step!=null?`${Math.max(p.step+1,0).toLocaleString()} / ${(+p.n_steps).toLocaleString()} steps`:(p.done!=null?`${(+p.done).toLocaleString()} / ${p.total!=null?(+p.total).toLocaleString():"?"}`:"");
+    const speed=p.steps_per_s!=null?`${f(p.steps_per_s,2)} steps/s<br><small>${f(p.instances_per_s,0)} inst/s</small>`:(p.queries_per_s!=null?`${f(p.queries_per_s,1)} / s`:"–");
+    return `<tr><td>${short(p.run)}</td><td>${p.gpu??"–"}<br><small>${(p.device||"").replace("NVIDIA ","")}</small></td>
+    <td><span class="st ${st}">${p.status}${p.task?": "+p.task:""}</span></td>
+    <td>${q!=null?`<span class="bar"><i style="width:${(100*q).toFixed(1)}%"></i></span>${(100*q).toFixed(1)}%<br><small>${pos}</small>`:"–"}</td>
+    <td>${p.epoch!=null?f(p.epoch,2)+" / "+(p.max_epochs||"–"):"–"}</td>
+    <td>${p.loss!=null?f(p.loss,4):"–"}<small> · ${p.loss_epoch!=null?f(p.loss_epoch,4):"–"}</small></td>
+    <td>${v!=null?f(v,3)+(p.val_chance?` <small>${f(v/p.val_chance,1)}× chance</small>`:"")+`<br><small>epoch ${f(p.val_epoch,2)} · ${p.val_kind||""}</small>`:"–"}</td>
+    <td>${speed}</td><td>${dur(p.elapsed_s)}</td><td>${dur(p.eta_max_s)}</td><td>${clock(finish(p))}</td>
+    <td>${p.gpu_mem_alloc_gb!=null?f(p.gpu_mem_alloc_gb,1)+" / "+f(p.gpu_mem_peak_gb,1)+" GB":"–"}</td><td>${p.best_epoch??"–"}</td></tr>`;}).join("")
+    ||`<tr><td colspan="13" class="muted">no training process has reported yet</td></tr>`;
   const labels=H.map(h=>h.time);
   const devs=[...new Set(H.flatMap(h=>(h.gpus||[]).filter(g=>g.mem_used_gb!=null).map(g=>g.kind+":"+(g.kind==="mig"?g.name.split("MIG ").pop()+" "+String(g.id).slice(-6):g.id))))];
-  setSeries("c-mem",labels,devs.map(k=>({label:k,data:H.map(h=>{const g=(h.gpus||[]).find(g=>g.kind+":"+(g.kind==="mig"?g.name.split("MIG ").pop()+" "+String(g.id).slice(-6):g.id)===k);return g?g.mem_used_gb:null;})})));
+  const nameDev=k=>{const id=k.split(":").pop();return gpuRun[id]?`${k} · ${gpuRun[id]}`:k;};
+  setSeries(q["c-mem"],labels,devs.map(k=>({label:nameDev(k),data:H.map(h=>{const g=(h.gpus||[]).find(g=>g.kind+":"+(g.kind==="mig"?g.name.split("MIG ").pop()+" "+String(g.id).slice(-6):g.id)===k);return g?g.mem_used_gb:null;})})));
   const runNames=[...new Set(H.flatMap(h=>(h.progress||[]).filter(p=>p.steps_per_s!=null).map(p=>p.run)))].slice(-6);
-  setSeries("c-thr",labels,runNames.map(r=>({label:r.split("__").slice(-2).join(" "),data:H.map(h=>{const p=(h.progress||[]).find(p=>p.run===r);return p?p.steps_per_s:null;})})));
+  setSeries(q["c-thr"],labels,runNames.map(r=>({label:r.split("__").slice(-2).join(" "),data:H.map(h=>{const p=(h.progress||[]).find(p=>p.run===r);return p?p.steps_per_s:null;})})));
   const phys=[...new Set(H.flatMap(h=>(h.gpus||[]).filter(g=>g.kind==="gpu").map(g=>g.id)))];
-  setSeries("c-pow",labels,phys.flatMap(i=>[{label:`GPU ${i} power`,data:H.map(h=>((h.gpus||[]).find(g=>g.kind==="gpu"&&g.id===i)||{}).power_w??null)},
+  setSeries(q["c-pow"],labels,phys.flatMap(i=>[{label:`GPU ${i} power${gpuRun[i]?" · "+gpuRun[i]:""}`,data:H.map(h=>((h.gpus||[]).find(g=>g.kind==="gpu"&&g.id===i)||{}).power_w??null)},
                                            {label:`GPU ${i} temp`,data:H.map(h=>((h.gpus||[]).find(g=>g.kind==="gpu"&&g.id===i)||{}).temp_c??null)}]));
-  setSeries("c-cpu",labels,[{label:"CPU % of allocated",data:H.map(h=>(h.cpu||{}).cpu_pct_of_allocated??null)},
+  setSeries(q["c-cpu"],labels,[{label:"CPU % of allocated",data:H.map(h=>(h.cpu||{}).cpu_pct_of_allocated??null)},
                             {label:"node RAM %",data:H.map(h=>(h.cpu||{}).node_mem_used_pct??null)}]);
 }
+async function getJSON(path){
+  const r=await fetch(path+"?t="+Date.now(),{cache:"no-store"});if(!r.ok)throw new Error(path+": "+r.status);return r.json();
+}
+async function jobKeys(){
+  // hosted: every cluster pushes its own jobs.json over the others', so list infra/jobs/ from the manifest instead
+  if(window.SCIJEPA_HOSTED){const m=await window.SCIJEPA_HOSTED.manifest();
+    return Object.keys(m).map(p=>(p.match(/^infra\/jobs\/([^/]+)\.json$/)||[])[1]).filter(Boolean);}
+  try{return await getJSON("infra/jobs.json");}catch(e){return [];}
+}
 async function poll(){
-  try{const r=await fetch("infra/live.json?t="+Date.now(),{cache:"no-store"});if(!r.ok)throw new Error(r.status);
-      render(await r.json());$("err").textContent="";}
-  catch(e){$("err").textContent="no live data yet (infra/live.json): the monitor starts with the job's dashboard server";}
+  try{
+    const keys=await jobKeys();
+    let jobs=(await Promise.all(keys.map(k=>getJSON(`infra/jobs/${encodeURIComponent(k)}.json`).then(d=>[k,d],()=>null)))).filter(Boolean);
+    if(!jobs.length)jobs=[["live",await getJSON("infra/live.json")]];      // a job started before per-job files
+    const nowS=Date.now()/1000,age=d=>nowS-((d.now||{}).t||0);
+    const order=(a,b)=>String((a[1].system||{}).cluster).localeCompare(String((b[1].system||{}).cluster))||String(a[0]).localeCompare(String(b[0]),undefined,{numeric:true});
+    const active=jobs.filter(([,d])=>age(d)<ACTIVE_S).sort(order),ended=jobs.filter(([,d])=>age(d)>=ACTIVE_S).sort((a,b)=>age(a[1])-age(b[1]));
+    const box=$("jobs"),keep=new Set(active.map(([k])=>k));
+    for(const [k,{el}] of sections)if(!keep.has(k)){el.remove();sections.delete(k);}
+    active.forEach(([k,d])=>{const {el,q}=section(k);box.appendChild(el);render(d,q);});
+    const prog=active.flatMap(([,d])=>(d.now||{}).progress||[]);
+    const clusters=[...new Set(active.map(([,d])=>(d.system||{}).cluster||(d.system||{}).host))];
+    $("sum").textContent=active.length?`${active.length} job${active.length>1?"s":""} reporting on ${clusters.join(", ")} · `+
+      `${prog.length} training process${prog.length===1?"":"es"} · ${f(prog.reduce((a,p)=>a+(p.steps_per_s||0),0),2)} steps/s in total`
+      :"no job has reported in the last 15 minutes";
+    const det=$("ended");det.hidden=!ended.length;
+    det.querySelector("summary").textContent=`${ended.length} ended job${ended.length===1?"":"s"}`;
+    det.querySelector("tbody").innerHTML=ended.slice(0,30).map(([,d])=>{const s=d.system||{},r=(d.now||{}).runs;
+      return `<tr><td>${esc(s.cluster||"–")}</td><td>${esc(s.job)}</td><td>${esc(s.host)}</td><td>${esc(s.started||"–")}</td>
+      <td>${clock((d.now||{}).t)}</td><td>${r?`${r.done} / ${r.total}`:"–"}</td></tr>`;}).join("");
+    $("err").textContent="";
+  }catch(e){$("err").textContent="no live data yet (infra/jobs): the monitor starts with the job's dashboard server";}
   setTimeout(poll,1000);
 }
 poll();

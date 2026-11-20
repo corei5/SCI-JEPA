@@ -42,7 +42,7 @@ Data, outputs and machine-specific files are ignored in `.gitignore`: datasets (
 
 - Say what changed, why, and how you checked it (`uv run pytest`, a short training run, a figure).
 - Keep moves and renames in their own pull request and update every script that references the old path. `Analysis/JEPA-rea*.sh` and `run_LLM_rebuttal*.sh` import modules by name.
-- A large diff in `graphify-out/graph.json` is expected; the file is rebuilt whole.
+- `graphify-out/` is gitignored; build it locally with `graphify update .`.
 
 ## Code graph
 
